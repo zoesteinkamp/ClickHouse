@@ -111,6 +111,9 @@
 #if USE_SSL
 #    include <Poco/Net/SecureServerSocket.h>
 #    include <Server/CertificateReloader.h>
+#    include <Server/SSHPtyHandlerFactory.h>
+#    include "Server/SSH/LibSSHInitializer.h"
+#    include "Server/SSH/LibSSHLogger.h"
 #endif
 
 #if USE_GRPC
@@ -233,6 +236,15 @@ static std::string getCanonicalPath(std::string && path)
         path += '/';
     return std::move(path);
 }
+
+
+Server::Server() {
+#if USE_SSL
+    ssh::LibSSHInitializer::instance();
+    ssh::libsshLogger::initialize();
+#endif
+}
+
 
 Poco::Net::SocketAddress Server::socketBindListen(
     const Poco::Util::AbstractConfiguration & config,
@@ -2219,6 +2231,36 @@ void Server::createServers(
     #endif
             });
         }
+
+        port_name = "tcp_port_ssh";
+        createServer(
+            config,
+            listen_host,
+            port_name,
+            listen_try,
+            start_servers,
+            servers,
+            [&](UInt16 port) -> ProtocolServerAdapter
+            {
+#if USE_SSL
+                Poco::Net::ServerSocket socket;
+                auto address = socketBindListen(config, socket, listen_host, port, /* secure = */ false);
+                // socket.setReceiveTimeout(settings.receive_timeout);
+                // socket.setSendTimeout(settings.send_timeout);
+                return ProtocolServerAdapter(
+                    listen_host,
+                    port_name,
+                    "SSH pty: " + address.toString(),
+                    std::make_unique<TCPServer>(
+                        new SSHPtyHandlerFactory(*this, socket.sockfd(), "ssh_host_rsa_key", "", ""),
+                        server_pool,
+                        socket,
+                        new Poco::Net::TCPServerParams));
+#else
+            UNUSED(port);
+            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "SSL support for TCP protocol is disabled because Poco library was built without NetSSL support.");
+#endif
+            });
 
         if (server_type.shouldStart(ServerType::Type::MYSQL))
         {

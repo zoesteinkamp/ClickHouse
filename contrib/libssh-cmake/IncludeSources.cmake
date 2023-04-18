@@ -114,6 +114,15 @@ if(OPENSSL_VERSION VERSION_LESS "1.1.0")
     set(libssh_SRCS ${libssh_SRCS} ${LIB_SOURCE_DIR}/src/libcrypto-compat.c)
 endif()
 
+set(libssh_SRCS
+${libssh_SRCS}
+${LIB_SOURCE_DIR}/src/options.c
+${LIB_SOURCE_DIR}/src/server.c
+${LIB_SOURCE_DIR}/src/bind.c
+${LIB_SOURCE_DIR}/src/bind_config.c
+)
+
+
 add_library(_ssh STATIC ${libssh_SRCS})
 
 message(STATUS "Libssh links to: ${LIBSSH_LINK_LIBRARIES}")

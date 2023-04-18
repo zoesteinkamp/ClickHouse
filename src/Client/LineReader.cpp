@@ -23,16 +23,6 @@ void trim(String & s)
     s.erase(std::find_if(s.rbegin(), s.rend(), [](int ch) { return !std::isspace(ch); }).base(), s.end());
 }
 
-/// Check if multi-line query is inserted from the paste buffer.
-/// Allows delaying the start of query execution until the entirety of query is inserted.
-bool hasInputData()
-{
-    timeval timeout = {0, 0};
-    fd_set fds{};
-    FD_ZERO(&fds);
-    FD_SET(STDIN_FILENO, &fds);
-    return select(1, &fds, nullptr, nullptr, &timeout) == 1;
-}
 
 struct NoCaseCompare
 {
@@ -65,6 +55,17 @@ void addNewWords(Words & to, const Words & from, Compare comp)
 
 namespace DB
 {
+
+/// Check if multi-line query is inserted from the paste buffer.
+/// Allows delaying the start of query execution until the entirety of query is inserted.
+bool LineReader::hasInputData() const
+{
+    timeval timeout = {0, 0};
+    fd_set fds{};
+    FD_ZERO(&fds);
+    FD_SET(inFd, &fds);
+    return select(1, &fds, nullptr, nullptr, &timeout) == 1;
+}
 
 replxx::Replxx::completions_t LineReader::Suggest::getCompletions(const String & prefix, size_t prefix_length, const char * word_break_characters)
 {
@@ -134,11 +135,17 @@ void LineReader::Suggest::addWords(Words && new_words) // NOLINT(cppcoreguidelin
     }
 }
 
-LineReader::LineReader(const String & history_file_path_, bool multiline_, Patterns extenders_, Patterns delimiters_)
+LineReader::LineReader(
+    const String & history_file_path_, bool multiline_, Patterns extenders_, Patterns delimiters_,
+    std::istream& inputStream_, std::ostream& outputStream_, int inFd_
+)
     : history_file_path(history_file_path_)
     , multiline(multiline_)
     , extenders(std::move(extenders_))
     , delimiters(std::move(delimiters_))
+    , inputStream(inputStream_)
+    , outputStream(outputStream_)
+    , inFd(inFd_)
 {
     /// FIXME: check extender != delimiter
 }
@@ -150,6 +157,7 @@ String LineReader::readLine(const String & first_prompt, const String & second_p
 
     while (auto status = readOneLine(need_next_line ? second_prompt : first_prompt))
     {
+            std::cout << "Lr status " << status << std::endl;
         if (status == RESET_LINE)
         {
             line.clear();
@@ -215,9 +223,9 @@ LineReader::InputStatus LineReader::readOneLine(const String & prompt)
     input.clear();
 
     {
-        std::cout << prompt;
-        std::getline(std::cin, input);
-        if (!std::cin.good())
+        outputStream << prompt;
+        std::getline(inputStream, input);
+        if (!inputStream.good())
             return ABORT;
     }
 

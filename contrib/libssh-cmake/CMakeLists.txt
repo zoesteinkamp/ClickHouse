@@ -49,6 +49,7 @@ set(THREADS_PREFER_PTHREAD_FLAG ON)
 
 set(WITH_ZLIB OFF)
 set(WITH_SYMBOL_VERSIONING OFF)
+set(WITH_SERVER ON)
 
 # config.h checks
 include(ConfigureChecks.cmake)

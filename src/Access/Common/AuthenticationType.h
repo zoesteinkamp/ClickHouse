@@ -33,6 +33,9 @@ enum class AuthenticationType
     /// Password is encrypted in bcrypt hash.
     BCRYPT_PASSWORD,
 
+    // Authentication using ssh keys
+    SSH_KEY,
+
     MAX,
 };
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <base/types.h>
+#include "Access/SSHPublicKey.h"
 #include <memory>
 
 
@@ -84,6 +85,22 @@ private:
 class MySQLNative41Credentials : public CredentialsWithScramble
 {
     using CredentialsWithScramble::CredentialsWithScramble;
+};
+
+// Credentials, which contain just user and its public key.
+// The validness of the key must be checked before.
+class SSHKeyPlainCredentials : public Credentials
+{
+public:
+    explicit SSHKeyPlainCredentials(const String & user_name_, ssh::SSHPublicKey && key_)
+        : Credentials(user_name_), key(std::move(key_))
+    {
+        is_ready = true;
+    }
+
+    const ssh::SSHPublicKey & getKey() const { return key; }
+private:
+    ssh::SSHPublicKey key;
 };
 
 }

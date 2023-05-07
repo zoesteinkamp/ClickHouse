@@ -103,7 +103,8 @@ bool operator ==(const AuthenticationData & lhs, const AuthenticationData & rhs)
 {
     return (lhs.type == rhs.type) && (lhs.password_hash == rhs.password_hash)
         && (lhs.ldap_server_name == rhs.ldap_server_name) && (lhs.kerberos_realm == rhs.kerberos_realm)
-        && (lhs.ssl_certificate_common_names == rhs.ssl_certificate_common_names);
+        && (lhs.ssl_certificate_common_names == rhs.ssl_certificate_common_names)
+        && (lhs.ssh_keys == rhs.ssh_keys);
 }
 
 
@@ -125,6 +126,7 @@ void AuthenticationData::setPassword(const String & password_)
         case AuthenticationType::LDAP:
         case AuthenticationType::KERBEROS:
         case AuthenticationType::SSL_CERTIFICATE:
+        case AuthenticationType::SSH_KEY:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot specify password for authentication type {}", toString(type));
 
         case AuthenticationType::MAX:
@@ -169,7 +171,12 @@ void AuthenticationData::setPasswordHashHex(const String & hash)
 
 String AuthenticationData::getPasswordHashHex() const
 {
-    if (type == AuthenticationType::LDAP || type == AuthenticationType::KERBEROS || type == AuthenticationType::SSL_CERTIFICATE)
+    if (
+        type == AuthenticationType::LDAP
+        || type == AuthenticationType::KERBEROS
+        || type == AuthenticationType::SSL_CERTIFICATE
+        || type == AuthenticationType::SSH_KEY
+    )
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot get password hex hash for authentication type {}", toString(type));
 
     String hex;
@@ -228,6 +235,7 @@ void AuthenticationData::setPasswordHashBinary(const Digest & hash)
         case AuthenticationType::LDAP:
         case AuthenticationType::KERBEROS:
         case AuthenticationType::SSL_CERTIFICATE:
+        case AuthenticationType::SSH_KEY:
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot specify password binary hash for authentication type {}", toString(type));
 
         case AuthenticationType::MAX:
@@ -308,6 +316,13 @@ std::shared_ptr<ASTAuthenticationData> AuthenticationData::toAST() const
         {
             for (const auto & name : getSSLCertificateCommonNames())
                 node->children.push_back(std::make_shared<ASTLiteral>(name));
+
+            break;
+        }
+        case AuthenticationType::SSH_KEY:
+        {
+            for (const auto & key : getSshKeys())
+                node->children.push_back(std::make_shared<ASTLiteral>(key.getBase64Representation()));
 
             break;
         }

@@ -117,6 +117,7 @@ void ASTAuthenticationData::formatImpl(const FormatSettings & settings, FormatSt
                 password = true;
                 break;
             }
+            case AuthenticationType::SSH_KEY: [[fallthrough]];
             case AuthenticationType::NO_PASSWORD: [[fallthrough]];
             case AuthenticationType::MAX:
                 throw Exception(ErrorCodes::LOGICAL_ERROR, "AST: Unexpected authentication type {}", toString(*type));

@@ -96,6 +96,9 @@ bool Authentication::areCredentialsValid(const Credentials & credentials, const 
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
 
+            case AuthenticationType::SSH_KEY:
+                throw Authentication::Require<SSHKeyPlainCredentials>("ClickHouse SSH Keys Authentication");
+
             case AuthenticationType::MAX:
                 break;
         }
@@ -122,6 +125,9 @@ bool Authentication::areCredentialsValid(const Credentials & credentials, const 
 
             case AuthenticationType::SSL_CERTIFICATE:
                 throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
+
+            case AuthenticationType::SSH_KEY:
+                throw Authentication::Require<SSHKeyPlainCredentials>("ClickHouse SSH Keys Authentication");
 
             case AuthenticationType::MAX:
                 break;
@@ -156,6 +162,9 @@ bool Authentication::areCredentialsValid(const Credentials & credentials, const 
             case AuthenticationType::BCRYPT_PASSWORD:
                 return checkPasswordBcrypt(basic_credentials->getPassword(), auth_data.getPasswordHashBinary());
 
+            case AuthenticationType::SSH_KEY:
+                throw Authentication::Require<SSHKeyPlainCredentials>("ClickHouse SSH Keys Authentication");
+
             case AuthenticationType::MAX:
                 break;
         }
@@ -178,6 +187,39 @@ bool Authentication::areCredentialsValid(const Credentials & credentials, const 
 
             case AuthenticationType::SSL_CERTIFICATE:
                 return auth_data.getSSLCertificateCommonNames().contains(ssl_certificate_credentials->getCommonName());
+
+            case AuthenticationType::SSH_KEY:
+                throw Authentication::Require<SSHKeyPlainCredentials>("ClickHouse SSH Keys Authentication");
+
+            case AuthenticationType::MAX:
+                break;
+        }
+    }
+
+    if (const auto * ssh_key_credentials = typeid_cast<const SSHKeyPlainCredentials *>(&credentials))
+    {
+        switch (auth_data.getType())
+        {
+            case AuthenticationType::NO_PASSWORD:
+            case AuthenticationType::PLAINTEXT_PASSWORD:
+            case AuthenticationType::SHA256_PASSWORD:
+            case AuthenticationType::DOUBLE_SHA1_PASSWORD:
+            case AuthenticationType::BCRYPT_PASSWORD:
+            case AuthenticationType::LDAP:
+                throw Authentication::Require<BasicCredentials>("ClickHouse Basic Authentication");
+
+            case AuthenticationType::KERBEROS:
+                throw Authentication::Require<GSSAcceptorContext>(auth_data.getKerberosRealm());
+
+            case AuthenticationType::SSL_CERTIFICATE:
+                throw Authentication::Require<BasicCredentials>("ClickHouse X.509 Authentication");
+
+            case AuthenticationType::SSH_KEY:
+            {
+                // For SSHKeyPlainCredentials just check, that user is associated with provided public key
+                const auto & keys = auth_data.getSshKeys();
+                return std::find(keys.begin(), keys.end(), ssh_key_credentials->getKey()) != keys.end();
+            }
 
             case AuthenticationType::MAX:
                 break;

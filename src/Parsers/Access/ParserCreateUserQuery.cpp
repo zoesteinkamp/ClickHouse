@@ -78,6 +78,7 @@ namespace
             bool expect_ldap_server_name = false;
             bool expect_kerberos_realm = false;
             bool expect_common_names = false;
+            bool expect_ssh_keys = false;
 
             if (ParserKeyword{"WITH"}.ignore(pos, expected))
             {
@@ -93,6 +94,8 @@ namespace
                             expect_kerberos_realm = true;
                         else if (check_type == AuthenticationType::SSL_CERTIFICATE)
                             expect_common_names = true;
+                        else if (check_type == AuthenticationType::SSH_KEY)
+                            expect_ssh_keys = true;
                         else if (check_type != AuthenticationType::NO_PASSWORD)
                             expect_password = true;
 
@@ -163,6 +166,10 @@ namespace
 
                 if (!ParserList{std::make_unique<ParserStringAndSubstitution>(), std::make_unique<ParserToken>(TokenType::Comma), false}.parse(pos, common_names, expected))
                     return false;
+            }
+            else if (expect_ssh_keys)
+            {
+                return false; // TODO Parse keys in base64 with types
             }
 
             auth_data = std::make_shared<ASTAuthenticationData>();

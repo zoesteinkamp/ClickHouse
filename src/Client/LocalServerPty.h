@@ -24,8 +24,16 @@ namespace DB
 class LocalServerPty : public ClientBasePty, public Loggers
 {
 public:
-    explicit LocalServerPty(DB::IServer& server, const std::string& tty_file_name_, int ttyFd_, std::istream& iStream, std::ostream& oStream)
-        : ClientBasePty(tty_file_name_, ttyFd_, iStream, oStream) { global_context = server.context();}
+    explicit LocalServerPty(
+        std::unique_ptr<Session> && session_,
+        const std::string & tty_file_name_,
+        int ttyFd_,
+        std::istream & iStream,
+        std::ostream & oStream)
+        : ClientBasePty(tty_file_name_, ttyFd_, iStream, oStream), session(std::move(session_))
+    {
+        global_context = session->makeSessionContext();
+    }
 
     // void initialize(Poco::Util::Application & self) override;
 
@@ -68,6 +76,7 @@ private:
 
     std::optional<StatusFile> status;
     std::optional<std::filesystem::path> temporary_directory_to_delete;
+    std::unique_ptr<Session> session;
 };
 
 }

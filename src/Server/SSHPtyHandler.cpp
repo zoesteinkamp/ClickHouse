@@ -1,4 +1,5 @@
 #include <atomic>
+#include <stdexcept>
 #include <Server/PTY/openpty.h>
 #include <Server/SSH/clibssh.h>
 #include <Server/SSHPtyHandler.h>
@@ -7,17 +8,15 @@
 #include <sys/poll.h>
 #include <Poco/Net/StreamSocket.h>
 #include "Common/ThreadPool.h"
+#include "Access/Common/AuthenticationType.h"
+#include "Access/Credentials.h"
+#include "Access/SSHPublicKey.h"
 #include "Client/LocalServerPty.h"
 #include "Server/SSH/SSHChannel.h"
 #include "Server/SSH/SSHEvent.h"
 #include "Server/TCPServer.h"
 
-namespace DB
-{
-
-namespace
-{
-
+namespace {
 
 /*
 Need to generate adapter functions, such for each member function, for example:
@@ -48,65 +47,20 @@ Maybe there is a better way? Or just write boilerplate code and avoid macros?
         auto * self = static_cast<class *>(userdata); \
         return self->func_name(args...); \
     }
+}
 
-
-class SessionCallback
+namespace DB
 {
-public:
-    explicit SessionCallback(ssh::SSHSession & session)
-    {
-        server_cb.userdata = this;
-        server_cb.auth_pubkey_function = auth_publickey_adapter<ssh_session, const char *, ssh_key, char>;
-        ssh_set_auth_methods(session.get(), SSH_AUTH_METHOD_PUBLICKEY);
-        server_cb.channel_open_request_session_function = channel_open_adapter<ssh_session>;
-        ssh_callbacks_init(&server_cb) ssh_set_server_callbacks(session.get(), &server_cb);
-    }
 
-    ssh::SSHChannel & getChannel() { return channel.value(); }
+namespace
+{
 
-    size_t auth_attempts = 0;
-    bool authenticated = false;
-    std::optional<ssh::SSHChannel> channel;
-
-private:
-    ssh_channel channel_open(ssh_session session)
-    {
-        channel = ssh::SSHChannel(session);
-        return channel->get();
-    }
-
-    GENERATE_ADAPTER_FUNCTION(SessionCallback, channel_open, ssh_channel)
-
-    int auth_publickey(ssh_session session, const char * user, ssh_key, char signature_state)
-    {
-        (void)user;
-        (void)session;
-
-        if (signature_state == SSH_PUBLICKEY_STATE_NONE)
-        {
-            return SSH_AUTH_SUCCESS;
-        }
-
-        if (signature_state != SSH_PUBLICKEY_STATE_VALID)
-        {
-            auth_attempts += 1;
-            return SSH_AUTH_DENIED;
-        }
-
-
-        authenticated = true;
-        return SSH_AUTH_SUCCESS;
-    }
-
-    GENERATE_ADAPTER_FUNCTION(SessionCallback, auth_publickey, int)
-
-    ssh_server_callbacks_struct server_cb = {};
-};
 
 class ChannelCallback
 {
 public:
-    explicit ChannelCallback(ssh::SSHChannel & channel, IServer & server_) : server(server_)
+    explicit ChannelCallback(ssh::SSHChannel && channel_, std::unique_ptr<Session> && dbSession_)
+        : channel(std::move(channel_)), dbSession(std::move(dbSession_))
     {
         channel_cb.userdata = this;
         channel_cb.channel_pty_request_function = pty_request_adapter<ssh_session, ssh_channel, const char *, int, int, int, int>;
@@ -130,17 +84,16 @@ public:
     int child_stdin = -1;
     int child_stdout = -1;
     winsize winsize = {0, 0, 0, 0};
-    DB::IServer & server;
+    ssh::SSHChannel channel;
+    std::unique_ptr<Session> dbSession;
     ThreadFromGlobalPool threadG;
     std::atomic_flag finished = ATOMIC_FLAG_INIT;
 
 private:
-    int pty_request(ssh_session session, ssh_channel channel, const char * term, int cols, int rows, int py, int px)
+    int pty_request(ssh_session, ssh_channel, const char * term, int cols, int rows, int py, int px) noexcept
     {
         std::cout << "pty_request\n";
 
-        (void)session;
-        (void)channel;
         (void)term;
 
         winsize.ws_row = rows;
@@ -172,7 +125,7 @@ private:
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, pty_request, int)
 
-    int pty_resize(ssh_session, ssh_channel, int cols, int rows, int py, int px)
+    int pty_resize(ssh_session, ssh_channel, int cols, int rows, int py, int px) noexcept
     {
         winsize.ws_row = rows;
         winsize.ws_col = cols;
@@ -189,10 +142,8 @@ private:
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, pty_resize, int)
 
-    int data_function(ssh_session session, ssh_channel channel, void * data, uint32_t len, int is_stderr) const
+    int data_function(ssh_session, ssh_channel, void * data, uint32_t len, int is_stderr) const noexcept
     {
-        (void)session;
-        (void)channel;
         (void)is_stderr;
 
         if (len == 0 || child_stdin == -1)
@@ -217,7 +168,7 @@ private:
             boost::iostreams::stream<boost::iostreams::file_descriptor_sink> tty_output_stream(fd_sink);
             tty_output_stream << std::unitbuf;
             std::cout << "construct locaclserver\n";
-            auto local = DB::LocalServerPty(server, std::string(pty_slave_name), pty_slave, tty_input_stream, tty_output_stream);
+            auto local = DB::LocalServerPty(std::move(dbSession), std::string(pty_slave_name), pty_slave, tty_input_stream, tty_output_stream);
             std::cout << "init locaclserver\n";
             local.init();
             std::cout << "launch locaclserver\n";
@@ -238,17 +189,14 @@ private:
         }
     }
 
-    int shell_request(ssh_session session, ssh_channel channel)
+    int shell_request(ssh_session, ssh_channel) noexcept
     {
-        (void)session;
-        (void)channel;
-
         if (child_stdout > 0)
         {
             return SSH_ERROR;
         }
 
-        if (pty_master != -1 && pty_slave != -1)
+        if (pty_master != -1 && pty_slave != -1 && dbSession)
         {
             threadG = ThreadFromGlobalPool(&ChannelCallback::shell_execution, this);
             /* pty fd is bi-directional */
@@ -282,6 +230,116 @@ int process_stdout(socket_t fd, int revents, void * userdata)
     return n;
 }
 
+class SessionCallback
+{
+public:
+    explicit SessionCallback(ssh::SSHSession & session, IServer & server, const Poco::Net::SocketAddress & address_)
+        : server_context(server.context()), peerAddress(address_)
+    {
+        server_cb.userdata = this;
+        server_cb.auth_password_function = auth_password_adapter<ssh_session, const char*, const char*>;
+        server_cb.auth_pubkey_function = auth_publickey_adapter<ssh_session, const char *, ssh_key, char>;
+        ssh_set_auth_methods(session.get(), SSH_AUTH_METHOD_PASSWORD | SSH_AUTH_METHOD_PUBLICKEY);
+        server_cb.channel_open_request_session_function = channel_open_adapter<ssh_session>;
+        ssh_callbacks_init(&server_cb) ssh_set_server_callbacks(session.get(), &server_cb);
+    }
+
+    size_t auth_attempts = 0;
+    bool authenticated = false;
+    std::unique_ptr<Session> dbSession;
+    DB::ContextMutablePtr server_context;
+    Poco::Net::SocketAddress peerAddress;
+    std::unique_ptr<ChannelCallback> channelCallback;
+
+private:
+    ssh_channel channel_open(ssh_session session) noexcept
+    {
+        if (!dbSession)
+        {
+            return nullptr;
+        }
+        try
+        {
+            auto channel = ssh::SSHChannel(session);
+            channelCallback = std::make_unique<ChannelCallback>(std::move(channel), std::move(dbSession));
+            return channelCallback->channel.get();
+        }
+        catch (const std::runtime_error & err)
+        {
+            std::cerr << err.what();
+            return nullptr;
+        }
+    }
+
+    GENERATE_ADAPTER_FUNCTION(SessionCallback, channel_open, ssh_channel)
+
+    int auth_password(ssh_session, const char * user, const char * pass) noexcept
+    {
+        try
+        {
+            auto dbSessionCreated = std::make_unique<Session>(server_context, ClientInfo::Interface::LOCAL);
+            String user_name(user), password(pass);
+            dbSessionCreated->authenticate(user_name, password, peerAddress);
+            authenticated = true;
+            dbSession = std::move(dbSessionCreated);
+            return SSH_AUTH_SUCCESS;
+        }
+        catch (...)
+        {
+            ++auth_attempts;
+            return SSH_AUTH_DENIED;
+        }
+    }
+
+    GENERATE_ADAPTER_FUNCTION(SessionCallback, auth_password, int)
+
+    int auth_publickey(ssh_session, const char * user, ssh_key key, char signature_state) noexcept
+    {
+        try
+        {
+            auto dbSessionCreated = std::make_unique<Session>(server_context, ClientInfo::Interface::LOCAL);
+            String user_name(user);
+
+
+            if (signature_state == SSH_PUBLICKEY_STATE_NONE)
+            {
+                // This is the case when user wants to check if he is able to use this type of authentication.
+                // Also here we may check if the key is assosiated with the user, but current session
+                // authentication mechanism doesn't support it.
+                if (dbSessionCreated->getAuthenticationType(user_name) != AuthenticationType::SSH_KEY)
+                {
+                    return SSH_AUTH_DENIED;
+                }
+                return SSH_AUTH_SUCCESS;
+            }
+
+            if (signature_state != SSH_PUBLICKEY_STATE_VALID)
+            {
+                ++auth_attempts;
+                return SSH_AUTH_DENIED;
+            }
+
+            // The signature is checked, so just verify that user is assosiated with publickey.
+            // Function will throw if authentication fails.
+            dbSessionCreated->authenticate(SSHKeyPlainCredentials{user_name, ssh::SSHPublicKey::createNonOwning(key)}, peerAddress);
+
+
+            authenticated = true;
+            dbSession = std::move(dbSessionCreated);
+            return SSH_AUTH_SUCCESS;
+        }
+        catch (...)
+        {
+            ++auth_attempts;
+            return SSH_AUTH_DENIED;
+        }
+    }
+
+    GENERATE_ADAPTER_FUNCTION(SessionCallback, auth_publickey, int)
+
+    ssh_server_callbacks_struct server_cb = {};
+};
+
 }
 
 SSHPtyHandler::SSHPtyHandler(IServer & server_, ssh::SSHSession && session_, const Poco::Net::StreamSocket & socket)
@@ -292,8 +350,7 @@ SSHPtyHandler::SSHPtyHandler(IServer & server_, ssh::SSHSession && session_, con
 void SSHPtyHandler::run()
 {
     ssh::SSHEvent event;
-    SessionCallback sdata(session);
-    // handle_session(session, server);
+    SessionCallback sdata(session, server, socket().peerAddress());
     if (session.handleKeyExchange() != SSH_OK)
     {
         printf("error\n");
@@ -302,7 +359,7 @@ void SSHPtyHandler::run()
     }
     event.add_session(session.get());
     int n = 0;
-    while (!sdata.authenticated || !sdata.channel.has_value())
+    while (!sdata.authenticated || !sdata.channelCallback)
     {
         /* If the user has used up all attempts, or if he hasn't been able to
          * authenticate in 10 seconds (n * 100ms), disconnect. */
@@ -311,7 +368,7 @@ void SSHPtyHandler::run()
             return;
         }
 
-        if (event.poll(100) == SSH_ERROR)
+        if (!server.isCancelled() && event.poll(100) == SSH_ERROR)
         {
             std::cout << "ERROR\n";
             std::cerr << session.getError() << '\n';
@@ -319,7 +376,6 @@ void SSHPtyHandler::run()
         }
         n++;
     }
-    ChannelCallback cdata(sdata.getChannel(), server);
     bool fdsSet = false;
 
     do
@@ -328,39 +384,39 @@ void SSHPtyHandler::run()
          * even our child process's stdout/stderr (once it's started). */
         if (event.poll(100) == SSH_ERROR)
         {
-            sdata.channel->close();
+            sdata.channelCallback->channel.close();
         }
         // std::cout<< "Wake up\n";
 
         /* If child process's stdout/stderr has been registered with the event,
          * or the child process hasn't started yet, continue. */
-        if (fdsSet || cdata.child_stdout == -1)
+        if (fdsSet || sdata.channelCallback->child_stdout == -1)
         {
             continue;
         }
         /* Executed only once, once the child process starts. */
         fdsSet = true;
         /* If stdout valid, add stdout to be monitored by the poll event. */
-        if (cdata.child_stdout != -1)
+        if (sdata.channelCallback->child_stdout != -1)
         {
-            if (event.add_fd(cdata.child_stdout, POLLIN, process_stdout, sdata.channel->get()) != SSH_OK)
+            if (event.add_fd(sdata.channelCallback->child_stdout, POLLIN, process_stdout, sdata.channelCallback->channel.get()) != SSH_OK)
             {
                 std::cerr << "Failed to register stdout to poll context\n";
-                sdata.channel->close();
+                sdata.channelCallback->channel.close();
             }
         }
-    } while (sdata.channel->isOpen() && !cdata.finished.test() && !server.isCancelled());
+    } while (sdata.channelCallback->channel.isOpen() && !sdata.channelCallback->finished.test() && !server.isCancelled());
     std::cout << "exiting from loop\n";
-    std::cout << "Channel open: " << sdata.channel->isOpen() << " finished: " << cdata.finished.test()
+    std::cout << "Channel open: " << sdata.channelCallback->channel.isOpen() << " finished: " << sdata.channelCallback->finished.test()
               << " server cancelled: " << server.isCancelled() << "\n";
 
-    close(cdata.pty_master);
+    close(sdata.channelCallback->pty_master);
 
-    event.remove_fd(cdata.child_stdout);
+    event.remove_fd(sdata.channelCallback->child_stdout);
 
 
-    sdata.channel->sendEof();
-    sdata.channel->close();
+    sdata.channelCallback->channel.sendEof();
+    sdata.channelCallback->channel.close();
 
     /* Wait up to 5 seconds for the client to terminate the session. */
     for (n = 0; n < 50 && !session.hasFinished(); n++)

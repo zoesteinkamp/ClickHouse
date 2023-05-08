@@ -31,7 +31,7 @@
 #include <IO/ReadBufferFromString.h>
 #include <IO/WriteBufferFromFileDescriptor.h>
 #include <IO/UseSSL.h>
-#include <IO/IOThreadPool.h>
+#include <IO/SharedThreadPools.h>
 #include <Parsers/IAST.h>
 #include <Parsers/ASTInsertQuery.h>
 #include <Common/ErrorHandlers.h>
@@ -375,8 +375,12 @@ void LocalServerPty::setupUsers()
 void LocalServerPty::connect()
 {
     connection_parameters = ConnectionParameters(config());
+    if (!session)
+    {
+        throw Exception(ErrorCodes::LOGICAL_ERROR, "Error creating connection without session object");
+    }
     connection = LocalConnection::createConnection(
-        connection_parameters, global_context, need_render_progress, need_render_profile_events, server_display_name);
+        connection_parameters, std::move(session), need_render_progress, need_render_profile_events, server_display_name);
 }
 
 

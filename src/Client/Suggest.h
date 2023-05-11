@@ -9,7 +9,6 @@
 #include <IO/ConnectionTimeouts.h>
 #include <atomic>
 #include <thread>
-#include <unistd.h>
 
 
 namespace DB
@@ -28,7 +27,7 @@ public:
 
     /// Load suggestions for clickhouse-client.
     template <typename ConnectionType>
-    void load(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit, int errFd=STDERR_FILENO);
+    void load(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit);
 
     void load(IServerConnection & connection,
               const ConnectionTimeouts & timeouts,

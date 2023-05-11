@@ -34,7 +34,8 @@ ConnectionParameters ConnectionParameters::createForEmbedded(const String & user
             Poco::Timespan(DBMS_DEFAULT_CONNECT_TIMEOUT_SEC, 0),
             Poco::Timespan(DBMS_DEFAULT_SEND_TIMEOUT_SEC, 0),
             Poco::Timespan(DBMS_DEFAULT_RECEIVE_TIMEOUT_SEC, 0),
-            Poco::Timespan(0, 0));
+            Poco::Timespan(0, 0),
+            Poco::Timespan(DBMS_DEFAULT_RECEIVE_TIMEOUT_SEC, 0));
 
     connection_params.timeouts.sync_request_timeout = Poco::Timespan(DBMS_DEFAULT_SYNC_REQUEST_TIMEOUT_SEC, 0);
     return connection_params;

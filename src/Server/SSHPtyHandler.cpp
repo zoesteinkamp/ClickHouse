@@ -169,8 +169,6 @@ private:
             tty_output_stream << std::unitbuf;
             std::cout << "construct locaclserver\n";
             auto local = DB::LocalServerPty(std::move(dbSession), std::string(pty_slave_name), pty_slave, tty_input_stream, tty_output_stream);
-            std::cout << "init locaclserver\n";
-            local.init();
             std::cout << "launch locaclserver\n";
             local.main({});
         }

@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <mutex>
+#include <unistd.h>
 #include <IO/Progress.h>
 #include <Interpreters/Context.h>
 #include <base/types.h>
@@ -32,7 +33,10 @@ using HostToTimesMap = std::unordered_map<String, ThreadEventData>;
 class ProgressIndication
 {
 public:
-    explicit ProgressIndication(std::ostream & outputStream_ = std::cout) : outputStream(outputStream_) { }
+    explicit ProgressIndication(std::ostream & outputStream_ = std::cout, int inFd_ = STDIN_FILENO, int errFd_ = STDERR_FILENO)
+        : outputStream(outputStream_), inFd(inFd_), errFd(errFd_)
+    {
+    }
 
     /// Write progress bar.
     void writeProgress(WriteBufferFromFileDescriptor & message);
@@ -107,6 +111,8 @@ private:
     mutable std::mutex progress_mutex;
 
     std::ostream & outputStream;
+    int inFd;
+    int errFd;
 };
 
 }

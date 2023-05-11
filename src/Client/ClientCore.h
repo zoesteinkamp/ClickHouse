@@ -2,6 +2,9 @@
 
 #include <string_view>
 #include "Common/NamePrompter.h"
+#include <cstdio>
+#include <istream>
+#include <unistd.h>
 #include <Parsers/ASTCreateQuery.h>
 #include <Common/ProgressIndication.h>
 #include <Common/InterruptListener.h>
@@ -10,6 +13,7 @@
 #include <Common/DNSResolver.h>
 #include <Core/ExternalTable.h>
 #include <Poco/Util/Application.h>
+#include <Poco/Util/LayeredConfiguration.h>
 #include <Interpreters/Context.h>
 #include <Client/Suggest.h>
 #include <Client/QueryFuzzer.h>
@@ -17,9 +21,6 @@
 #include <Storages/StorageFile.h>
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
-
-
-namespace po = boost::program_options;
 
 
 namespace DB
@@ -58,23 +59,26 @@ enum ProgressOption
 ProgressOption toProgressOption(std::string progress);
 std::istream& operator>> (std::istream & in, ProgressOption & progress);
 
-void interruptSignalHandler(int signum);
 
 class InternalTextLogs;
 class WriteBufferFromFileDescriptor;
 
-class ClientBase : public Poco::Util::Application, public IHints<2>
+class ClientCore
 {
 
 public:
     using Arguments = std::vector<String>;
 
-    ClientBase();
-    ~ClientBase() override;
+    explicit ClientCore(int inFd_, int outFd_, int errFd_, std::istream& iStream, std::ostream& oStream, std::ostream& eStream);
+    virtual ~ClientCore();
 
-    void init(int argc, char ** argv);
+    void setApp() { app = &Poco::Util::Application::instance(); }
 
-    std::vector<String> getAllRegisteredNames() const override { return cmd_options; }
+    Poco::Util::LayeredConfiguration& getConfig() const { return app->config(); }
+
+    bool tryStopQuery() { return query_interrupt_handler.try_stop(); }
+    void stopQuery() { return query_interrupt_handler.stop(); }
+
 
 protected:
     void runInteractive();
@@ -98,7 +102,6 @@ protected:
 
     static void adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth);
     ASTPtr parseQuery(const char *& pos, const char * end, bool allow_multi_statements) const;
-    static void setupSignalHandler();
 
     bool executeMultiQuery(const String & all_queries_text);
     MultiQueryProcessingStage analyzeMultiQueryText(
@@ -106,40 +109,15 @@ protected:
         String & query_to_execute, ASTPtr & parsed_query, const String & all_queries_text,
         std::unique_ptr<Exception> & current_exception);
 
-    static void clearTerminal();
+    void clearTerminal();
     void showClientVersion();
 
-    using ProgramOptionsDescription = boost::program_options::options_description;
-    using CommandLineOptions = boost::program_options::variables_map;
-
-    struct OptionsDescription
-    {
-        std::optional<ProgramOptionsDescription> main_description;
-        std::optional<ProgramOptionsDescription> external_description;
-        std::optional<ProgramOptionsDescription> hosts_and_ports_description;
-    };
 
     virtual void updateLoggerLevel(const String &) {}
-    virtual void printHelpMessage(const OptionsDescription & options_description) = 0;
-    virtual void addOptions(OptionsDescription & options_description) = 0;
-    virtual void processOptions(const OptionsDescription & options_description,
-                                const CommandLineOptions & options,
-                                const std::vector<Arguments> & external_tables_arguments,
-                                const std::vector<Arguments> & hosts_and_ports_arguments) = 0;
-    virtual void processConfig() = 0;
 
     bool processQueryText(const String & text);
 
-    virtual void readArguments(
-        int argc,
-        char ** argv,
-        Arguments & common_arguments,
-        std::vector<Arguments> & external_tables_arguments,
-        std::vector<Arguments> & hosts_and_ports_arguments) = 0;
-
     void setInsertionTable(const ASTInsertQuery & insert_query);
-
-    void addMultiquery(std::string_view query, Arguments & common_arguments) const;
 
 private:
     void receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, bool partial_result_on_first_cancel);
@@ -173,7 +151,6 @@ private:
     String prompt() const;
 
     void resetOutput();
-    void parseAndCheckOptions(OptionsDescription & options_description, po::variables_map & options, Arguments & arguments);
 
     void updateSuggest(const ASTPtr & ast);
 
@@ -181,6 +158,31 @@ private:
     bool addMergeTreeSettings(ASTCreateQuery & ast_create);
 
 protected:
+
+    class QueryInterruptHandler : private boost::noncopyable
+    {
+    public:
+        /// Store how much interrupt signals can be before stopping the query
+        /// by default stop after the first interrupt signal.
+        void start(Int32 signals_before_stop = 1) { exit_after_signals.store(signals_before_stop); }
+
+        /// Set value not greater then 0 to mark the query as stopped.
+        void stop() { return exit_after_signals.store(0); }
+
+        /// Return true if the query was stopped.
+        /// Query was stopped if it received at least "signals_before_stop" interrupt signals.
+        bool try_stop() { return exit_after_signals.fetch_sub(1) <= 0; }
+        bool cancelled() { return exit_after_signals.load() <= 0; }
+
+        /// Return how much interrupt signals remain before stop.
+        Int32 cancelled_status() { return exit_after_signals.load(); }
+    private:
+        std::atomic<Int32> exit_after_signals = 0;
+    };
+
+    QueryInterruptHandler query_interrupt_handler;
+
+    Poco::Util::Application* app;
     static bool isSyncInsertWithData(const ASTInsertQuery & insert_query, const ContextPtr & context);
     bool processMultiQueryFromFile(const String & file_name);
 
@@ -237,9 +239,9 @@ protected:
     ConnectionParameters connection_parameters;
 
     /// Buffer that reads from stdin in batch mode.
-    ReadBufferFromFileDescriptor std_in{STDIN_FILENO};
+    ReadBufferFromFileDescriptor std_in;
     /// Console output.
-    WriteBufferFromFileDescriptor std_out{STDOUT_FILENO};
+    WriteBufferFromFileDescriptor std_out;
     std::unique_ptr<ShellCommand> pager_cmd;
 
     /// The user can specify to redirect query output to a file.
@@ -252,6 +254,7 @@ protected:
     std::unique_ptr<InternalTextLogs> logs_out_stream;
 
     /// /dev/tty if accessible or std::cerr - for progress bar.
+    /// But running embedded into server, we write the progress to given tty file dexcriptor.
     /// We prefer to output progress bar directly to tty to allow user to redirect stdout and stderr and still get the progress indication.
     std::unique_ptr<WriteBufferFromFileDescriptor> tty_buf;
 
@@ -335,6 +338,13 @@ protected:
     bool cancelled = false;
 
     bool logging_initialized = false;
+
+    std::ostream& outputStream = std::cout;
+    std::ostream& errorStream = std::cerr;
+    std::istream& inputStream = std::cin;
+    int inFd = STDIN_FILENO;
+    int outFd = STDOUT_FILENO;
+    int errFd = STDERR_FILENO;
 };
 
 }

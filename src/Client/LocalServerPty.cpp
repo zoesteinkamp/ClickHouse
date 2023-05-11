@@ -88,15 +88,15 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
     delayed_interactive = false;
     if (!is_interactive || delayed_interactive)
     {
-        echo_queries = config().hasOption("echo") || config().hasOption("verbose");
-        ignore_error = config().getBool("ignore-error", false);
+        echo_queries = getConfig().hasOption("echo") || getConfig().hasOption("verbose");
+        ignore_error = getConfig().getBool("ignore-error", false);
         is_multiquery = true;
     }
-    print_stack_trace = config().getBool("stacktrace", false);
-    load_suggestions = (is_interactive || delayed_interactive) && !config().getBool("disable_suggestion", false);
+    print_stack_trace = getConfig().getBool("stacktrace", false);
+    load_suggestions = (is_interactive || delayed_interactive) && !getConfig().getBool("disable_suggestion", false);
 
 
-    format = config().getString("output-format", config().getString("format", is_interactive ? "PrettyCompact" : "TSV"));
+    format = getConfig().getString("output-format", getConfig().getString("format", is_interactive ? "PrettyCompact" : "TSV"));
     insert_format = "Values";
 
     /// Setting value from cmd arg overrides one from config
@@ -106,18 +106,18 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
     }
     else
     {
-        insert_format_max_block_size = config().getUInt64("insert_format_max_block_size",
+        insert_format_max_block_size = getConfig().getUInt64("insert_format_max_block_size",
             global_context->getSettingsRef().max_insert_block_size);
     }
 
 
 
-    server_display_name = config().getString("display_name", getFQDNOrHostName());
-    prompt_by_server_display_name = config().getRawString("prompt_by_server_display_name.default", "{display_name} :) ");
+    server_display_name = getConfig().getString("display_name", getFQDNOrHostName());
+    prompt_by_server_display_name = getConfig().getRawString("prompt_by_server_display_name.default", "{display_name} :) ");
     std::map<String, String> prompt_substitutions{{"display_name", server_display_name}};
     for (const auto & [key, value] : prompt_substitutions)
         boost::replace_all(prompt_by_server_display_name, "{" + key + "}", value);
-    initTtyBuffer(toProgressOption(config().getString("progress", "default")));
+    initTtyBuffer(toProgressOption(getConfig().getString("progress", "default")));
 
     if (is_interactive)
     {
@@ -149,35 +149,5 @@ void LocalServerPty::updateLoggerLevel(const String & )
 {
 }
 
-void LocalServerPty::processConfig()
-{
-}
-
-
-
-
-void LocalServerPty::printHelpMessage([[maybe_unused]] const OptionsDescription & options_description)
-{
-}
-
-
-void LocalServerPty::addOptions([[maybe_unused]]OptionsDescription & options_description)
-{
-}
-
-
-
-void LocalServerPty::processOptions(const OptionsDescription &, const CommandLineOptions & , const std::vector<Arguments> &, const std::vector<Arguments> &)
-{
-}
-
-void LocalServerPty::readArguments(int argc, char ** argv, Arguments & common_arguments, std::vector<Arguments> &, std::vector<Arguments> &)
-{
-    for (int arg_num = 1; arg_num < argc; ++arg_num)
-    {
-        const char * arg = argv[arg_num];
-        common_arguments.emplace_back(arg);
-    }
-}
 
 }

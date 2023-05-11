@@ -1,11 +1,10 @@
 #pragma once
 
-#include <Client/ClientBasePty.h>
+#include <Client/ClientCore.h>
 #include <Client/LocalConnection.h>
 
 #include <Common/StatusFile.h>
 #include <Common/InterruptListener.h>
-#include "Server/IServer.h"
 #include <Loggers/Loggers.h>
 #include <Core/Settings.h>
 #include <Interpreters/Context.h>
@@ -21,17 +20,18 @@ namespace DB
 /// Lightweight Application for clickhouse-local
 /// No networking, no extra configs and working directories, no pid and status files, no dictionaries, no logging.
 /// Quiet mode by default
-class LocalServerPty : public ClientBasePty, public Loggers
+class LocalServerPty : public ClientCore, public Loggers
 {
 public:
     explicit LocalServerPty(
         std::unique_ptr<Session> && session_,
-        const std::string & tty_file_name_,
+        const std::string & ,
         int ttyFd_,
         std::istream & iStream,
         std::ostream & oStream)
-        : ClientBasePty(tty_file_name_, ttyFd_, iStream, oStream), session(std::move(session_))
+        : ClientCore(ttyFd_, ttyFd_, ttyFd_, iStream, oStream, oStream), session(std::move(session_))
     {
+        setApp();
         global_context = session->makeSessionContext();
     }
 
@@ -46,16 +46,6 @@ protected:
     void processError(const String & query) const override; // TODO
 
     String getName() const override { return "local"; }
-
-    void printHelpMessage(const OptionsDescription & options_description) override;
-
-    void addOptions(OptionsDescription & options_description) override;
-
-    void processOptions(const OptionsDescription & options_description, const CommandLineOptions & options,
-                        const std::vector<Arguments> &, const std::vector<Arguments> &) override;
-
-    void processConfig() override;
-    void readArguments(int argc, char ** argv, Arguments & common_arguments, std::vector<Arguments> &, std::vector<Arguments> &) override;
 
 
     void updateLoggerLevel(const String & logs_level) override;

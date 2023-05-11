@@ -99,11 +99,14 @@ static const NameSet exit_strings
 namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
+
     extern const int DEADLOCK_AVOIDED;
+    extern const int DATABASE_ACCESS_DENIED;
     extern const int CLIENT_OUTPUT_FORMAT_SPECIFIED;
     extern const int UNKNOWN_PACKET_FROM_SERVER;
     extern const int NO_DATA_TO_INSERT;
     extern const int UNEXPECTED_PACKET_FROM_SERVER;
+    extern const int INCORRECT_FILE_NAME;
     extern const int INVALID_USAGE_OF_INPUT;
     extern const int CANNOT_SET_SIGNAL_HANDLER;
     extern const int UNRECOGNIZED_ARGUMENTS;
@@ -294,7 +297,7 @@ public:
 
 ClientBasePty::ClientBasePty(const std::string& tty_file_name_, int ttyFd_, std::istream& iStream, std::ostream& oStream)
 : app(Poco::Util::Application::instance()), tty_file_name(tty_file_name_),
-std_in(ttyFd_), std_out(ttyFd_), outputStream(oStream), errorStream(oStream), inputStream(iStream), ttyFd(ttyFd_) {
+std_in(ttyFd_), std_out(ttyFd_), progress_indication(oStream), outputStream(oStream), errorStream(oStream), inputStream(iStream), ttyFd(ttyFd_){
 }
 
 
@@ -1242,6 +1245,27 @@ void ClientBasePty::processInsertQuery(const String & query_to_execute, ASTPtr p
         else
             return;
     }
+    // Validate infile before we pass furhter, as some files may be unsafe if client is embedded into server
+    if (global_context->getApplicationType() == Context::ApplicationType::SERVER && parsed_insert_query.infile)
+    {
+        const auto & in_file_node = parsed_insert_query.infile->as<ASTLiteral &>();
+        const auto in_file = in_file_node.value.safeGet<std::string>();
+        String user_files_absolute_path = fs::weakly_canonical(global_context->getUserFilesPath());
+        fs::path fs_table_path(in_file);
+        if (fs_table_path.is_relative())
+            fs_table_path = user_files_absolute_path / fs_table_path;
+
+        /// Do not use fs::canonical or fs::weakly_canonical.
+        /// Otherwise it will not allow to work with symlinks in `user_files_path` directory.
+        String path = fs::absolute(fs_table_path).lexically_normal(); /// Normalize path.
+
+        auto table_path_stat = fs::status(path);
+        if (!fs::exists(table_path_stat))
+            throw Exception(ErrorCodes::INCORRECT_FILE_NAME, "Provided file doesn't exist: {}", in_file);
+
+        if (!fileOrSymlinkPathStartsWith(path, user_files_absolute_path))
+            throw Exception(ErrorCodes::DATABASE_ACCESS_DENIED, "File `{}` is not inside `{}`", path, user_files_absolute_path);
+    }
 
     QueryInterruptHandler::start();
     SCOPE_EXIT({ QueryInterruptHandler::stop(); });
@@ -1267,7 +1291,10 @@ void ClientBasePty::processInsertQuery(const String & query_to_execute, ASTPtr p
     {
         /// If structure was received (thus, server has not thrown an exception),
         /// send our data with that structure.
-        setInsertionTable(parsed_insert_query);
+        if (global_context->getApplicationType() != Context::ApplicationType::SERVER)
+        {
+            setInsertionTable(parsed_insert_query);
+        }
 
         sendData(sample, columns_description, parsed_query);
         receiveEndOfQuery();
@@ -2210,7 +2237,7 @@ void ClientBasePty::runInteractive()
 //
 //     ReplxxLineReader lr(*suggest, history_file, config().has("multiline"), query_extenders, query_delimiters, highlight_callback);
 // #else
-    LineReader lr(history_file, config().has("multiline"), query_extenders, query_delimiters, inputStream, outputStream, ttyFd);
+    LineReader lr(history_file, /* config().has("multiline") */false, query_extenders, query_delimiters, inputStream, outputStream, ttyFd);
 // #endif
 
     /// Enable bracketed-paste-mode so that we are able to paste multiline queries as a whole.

@@ -109,9 +109,9 @@ static String getLoadSuggestionQuery(Int32 suggestion_limit, bool basic_suggesti
 }
 
 template <typename ConnectionType>
-void Suggest::load(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit)
+void Suggest::load(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit, int errFd)
 {
-    loading_thread = std::thread([my_context = Context::createCopy(context), connection_parameters, suggestion_limit, this]
+    loading_thread = std::thread([errFd, my_context=Context::createCopy(context), connection_parameters, suggestion_limit, this]
     {
         ThreadStatus thread_status;
         for (size_t retry = 0; retry < 10; ++retry)
@@ -133,7 +133,7 @@ void Suggest::load(ContextPtr context, const ConnectionParameters & connection_p
                     ///
                     /// USER_SESSION_LIMIT_EXCEEDED is ignored here. The client will try to receive
                     /// suggestions using the main connection later.
-                    WriteBufferFromFileDescriptor out(STDERR_FILENO, 4096);
+                    WriteBufferFromFileDescriptor out(errFd, 4096);
                     out << "Cannot load data for command line suggestions: " << getCurrentExceptionMessage(false, true) << "\n";
                     out.next();
                 }
@@ -141,7 +141,7 @@ void Suggest::load(ContextPtr context, const ConnectionParameters & connection_p
             catch (...)
             {
                 last_error = getCurrentExceptionCode();
-                WriteBufferFromFileDescriptor out(STDERR_FILENO, 4096);
+                WriteBufferFromFileDescriptor out(errFd, 4096);
                 out << "Cannot load data for command line suggestions: " << getCurrentExceptionMessage(false, true) << "\n";
                 out.next();
             }
@@ -227,8 +227,8 @@ void Suggest::fillWordsFromBlock(const Block & block)
 }
 
 template
-void Suggest::load<Connection>(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit);
+void Suggest::load<Connection>(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit, int errFd);
 
 template
-void Suggest::load<LocalConnection>(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit);
+void Suggest::load<LocalConnection>(ContextPtr context, const ConnectionParameters & connection_parameters, Int32 suggestion_limit, int errFd);
 }

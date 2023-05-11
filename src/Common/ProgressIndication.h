@@ -32,6 +32,8 @@ using HostToTimesMap = std::unordered_map<String, ThreadEventData>;
 class ProgressIndication
 {
 public:
+    explicit ProgressIndication(std::ostream & outputStream_ = std::cout) : outputStream(outputStream_) { }
+
     /// Write progress bar.
     void writeProgress(WriteBufferFromFileDescriptor & message);
     void clearProgressOutput(WriteBufferFromFileDescriptor & message);
@@ -103,6 +105,8 @@ private:
     /// - hosts_data/cpu_usage_meter (guarded with profile_events_mutex)
     mutable std::mutex profile_events_mutex;
     mutable std::mutex progress_mutex;
+
+    std::ostream & outputStream;
 };
 
 }

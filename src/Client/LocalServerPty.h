@@ -35,15 +35,15 @@ public:
         global_context = session->makeSessionContext();
     }
 
-    // void initialize(Poco::Util::Application & self) override;
-
     int main(const std::vector<String> & /*args*/);
 
-    Poco::Logger& logger() const { return app.logger(); }
+
+    ~LocalServerPty() override { cleanup(); }
+
 protected:
     void connect() override;
 
-    void processError(const String & query) const override;
+    void processError(const String & query) const override; // TODO
 
     String getName() const override { return "local"; }
 
@@ -61,21 +61,8 @@ protected:
     void updateLoggerLevel(const String & logs_level) override;
 
 private:
-    /** Composes CREATE subquery based on passed arguments (--structure --file --table and --input-format)
-      * This query will be executed first, before queries passed through --query argument
-      * Returns empty string if it cannot compose that query.
-      */
-    std::string getInitialCreateTableQuery();
-
-    void tryInitPath();
-    void setupUsers();
     void cleanup();
 
-    void applyCmdOptions(ContextMutablePtr context);
-    void applyCmdSettings(ContextMutablePtr context);
-
-    std::optional<StatusFile> status;
-    std::optional<std::filesystem::path> temporary_directory_to_delete;
     std::unique_ptr<Session> session;
 };
 

@@ -157,7 +157,6 @@ String LineReader::readLine(const String & first_prompt, const String & second_p
 
     while (auto status = readOneLine(need_next_line ? second_prompt : first_prompt))
     {
-            std::cout << "Lr status " << status << std::endl;
         if (status == RESET_LINE)
         {
             line.clear();

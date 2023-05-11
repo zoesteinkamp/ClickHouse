@@ -32,6 +32,8 @@ struct ConnectionParameters
     /// Ask to enter the user's password if password option contains this value.
     /// "\n" is used because there is hardly a chance that a user would use '\n' as password.
     static constexpr std::string_view ASK_PASSWORD = "\n";
+
+    static ConnectionParameters createForEmbedded(const String & user, const String & database);
 };
 
 }

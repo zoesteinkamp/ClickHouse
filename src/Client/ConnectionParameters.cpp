@@ -21,6 +21,25 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
 }
 
+ConnectionParameters ConnectionParameters::createForEmbedded(const String & user, const String & database) {
+    auto connection_params = ConnectionParameters();
+    connection_params.host = "localhost";
+    connection_params.security = Protocol::Secure::Disable;
+    connection_params.password = "";
+    connection_params.user = user;
+    connection_params.default_database = database;
+    connection_params.compression = Protocol::Compression::Disable;
+
+    connection_params.timeouts = ConnectionTimeouts(
+            Poco::Timespan(DBMS_DEFAULT_CONNECT_TIMEOUT_SEC, 0),
+            Poco::Timespan(DBMS_DEFAULT_SEND_TIMEOUT_SEC, 0),
+            Poco::Timespan(DBMS_DEFAULT_RECEIVE_TIMEOUT_SEC, 0),
+            Poco::Timespan(0, 0));
+
+    connection_params.timeouts.sync_request_timeout = Poco::Timespan(DBMS_DEFAULT_SYNC_REQUEST_TIMEOUT_SEC, 0);
+    return connection_params;
+}
+
 ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config,
                                            std::string connection_host,
                                            std::optional<UInt16> connection_port)

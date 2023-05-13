@@ -24,8 +24,11 @@ struct ConnectionParameters
     ConnectionTimeouts timeouts;
 
     ConnectionParameters() = default;
-    ConnectionParameters(const Poco::Util::AbstractConfiguration & config);
-    ConnectionParameters(const Poco::Util::AbstractConfiguration & config, std::string host, std::optional<UInt16> port);
+    // We don't take database from config, as it can be changed after query execution
+    ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database);
+    ConnectionParameters(
+        const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host, std::optional<UInt16> port
+    );
 
     static UInt16 getPortFromConfig(const Poco::Util::AbstractConfiguration & config);
 

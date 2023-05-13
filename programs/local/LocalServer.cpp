@@ -424,7 +424,7 @@ void LocalServer::setupUsers()
 
 void LocalServer::connect()
 {
-    connection_parameters = ConnectionParameters(config());
+    connection_parameters = ConnectionParameters(config(), default_database);
     connection = LocalConnection::createConnection(
         connection_parameters, global_context, need_render_progress, need_render_profile_events, server_display_name);
 }
@@ -582,12 +582,52 @@ void LocalServer::processConfig()
     {
         echo_queries = config().hasOption("echo") || config().hasOption("verbose");
         ignore_error = config().getBool("ignore-error", false);
+
+        if (!delayed_interactive)
+        {
+            query_id = config().getString("query_id", "");
+        }
     }
 
+    if (is_interactive || delayed_interactive)
+    {
+        if (home_path.empty())
+        {
+            const char * home_path_cstr = getenv("HOME"); // NOLINT(concurrency-mt-unsafe)
+            if (home_path_cstr)
+                home_path = home_path_cstr;
+        }
+
+        /// Load command history if present.
+        if (config().has("history_file"))
+            history_file = config().getString("history_file");
+        else
+        {
+            auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
+            if (history_file_from_env)
+                history_file = history_file_from_env;
+            else if (!home_path.empty())
+                history_file = home_path + "/.clickhouse-client-history";
+        }
+    }
+
+    if (config().has("query"))
+    {
+        static_query = config().getRawString("query"); /// Poco configuration should not process substitutions in form of ${...} inside query.
+    }
+
+    pager = config().getString("pager", "");
+
+    enable_highlight = config().getBool("highlight", true);
+    multiline = config().has("multiline");
     print_stack_trace = config().getBool("stacktrace", false);
     const std::string clickhouse_dialect{"clickhouse"};
     load_suggestions = (is_interactive || delayed_interactive) && !config().getBool("disable_suggestion", false)
         && config().getString("dialect", clickhouse_dialect) == clickhouse_dialect;
+    if (load_suggestions)
+    {
+        suggestion_limit = config().getInt("suggestion_limit");
+    }
 
     auto logging = (config().has("logger.console")
                     || config().has("logger.level")
@@ -738,7 +778,7 @@ void LocalServer::processConfig()
       * Otherwise, metadata of temporary File(format, EXPLICIT_PATH) tables will pollute metadata/ directory;
       *  if such tables will not be dropped, clickhouse-server will not be able to load them due to security reasons.
       */
-    std::string default_database = config().getString("default_database", "_local");
+    default_database = config().getString("default_database", "_local");
     DatabaseCatalog::instance().attachDatabase(default_database, createClickHouseLocalDatabaseOverlay(default_database, global_context));
     global_context->setCurrentDatabase(default_database);
 

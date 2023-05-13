@@ -508,7 +508,6 @@ try
         }
 
         WriteBuffer * out_buf = nullptr;
-        String pager = getConfig().getString("pager", "");
         if (!pager.empty() && !is_embedded)
         {
             if (SIG_ERR == signal(SIGPIPE, SIG_IGN))
@@ -1856,7 +1855,7 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
         {
             const String & new_database = use_query->getDatabase();
             /// If the client initiates the reconnection, it takes the settings from the config.
-            getConfig().setString("database", new_database);
+            default_database = new_database;
             /// If the connection initiates the reconnection, it uses its variable.
             connection->setDefaultDatabase(new_database);
         }
@@ -2251,13 +2250,7 @@ void ClientCore::initQueryIdFormats()
         return;
 
     /// Initialize query_id_formats if any
-    if (getConfig().has("query_id_formats"))
-    {
-        Poco::Util::AbstractConfiguration::Keys keys;
-        getConfig().keys("query_id_formats", keys);
-        for (const auto & name : keys)
-            query_id_formats.emplace_back(name + ":", getConfig().getString("query_id_formats." + name));
-    }
+    initUserProvidedQueryIdFormats();
 
     if (query_id_formats.empty())
         query_id_formats.emplace_back("Query id:", " {query_id}\n");
@@ -2301,7 +2294,7 @@ bool ClientCore::addMergeTreeSettings(ASTCreateQuery & ast_create)
 
 void ClientCore::runInteractive()
 {
-    if (getConfig().has("query_id"))
+    if (!query_id.empty())
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "query_id could be specified only in non-interactive mode");
     if (print_time_to_stderr)
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "time option could be specified only in non-interactive mode");
@@ -2316,29 +2309,10 @@ void ClientCore::runInteractive()
     {
         /// Load suggestion data from the server.
         if (global_context->getApplicationType() == Context::ApplicationType::CLIENT)
-            suggest->load<Connection>(global_context, connection_parameters, getConfig().getInt("suggestion_limit"));
+            suggest->load<Connection>(global_context, connection_parameters, suggestion_limit);
         else if (global_context->getApplicationType() == Context::ApplicationType::LOCAL)
-            suggest->load<LocalConnection>(global_context, connection_parameters, getConfig().getInt("suggestion_limit"));
+            suggest->load<LocalConnection>(global_context, connection_parameters, suggestion_limit);
         // Embedded type will not work here, as we need to 1. refactor replxx, 2. refactor Suggest
-    }
-
-    if (home_path.empty())
-    {
-        const char * home_path_cstr = getenv("HOME"); // NOLINT(concurrency-mt-unsafe)
-        if (home_path_cstr)
-            home_path = home_path_cstr;
-    }
-
-    /// Load command history if present.
-    if (getConfig().has("history_file"))
-        history_file = getConfig().getString("history_file");
-    else
-    {
-        auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
-        if (history_file_from_env)
-            history_file = history_file_from_env;
-        else if (!home_path.empty())
-            history_file = home_path + "/.clickhouse-client-history";
     }
 
     if (!history_file.empty() && !fs::exists(history_file))
@@ -2372,13 +2346,13 @@ void ClientCore::runInteractive()
     else
     {
         replxx::Replxx::highlighter_callback_t highlight_callback{};
-        if (getConfig().getBool("highlight", true))
+        if (enable_highlight)
             highlight_callback = highlight;
 
-        lr = std::make_unique<ReplxxLineReader>(*suggest, history_file, getConfig().has("multiline"), query_extenders, query_delimiters, word_break_characters, highlight_callback);
+        lr = std::make_unique<ReplxxLineReader>(*suggest, history_file, multiline, query_extenders, query_delimiters, word_break_characters, highlight_callback);
     }
 #else
-    lr = std::make_unique<LineReader>(history_file, /* config().has("multiline") */false, query_extenders, query_delimiters, word_break_characters, inputStream, outputStream, inFd);
+    lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, inputStream, outputStream, inFd);
 #endif
 
     /// Enable bracketed-paste-mode so that we are able to paste multiline queries as a whole.
@@ -2546,7 +2520,7 @@ void ClientCore::runNonInteractive()
     {
         /// If 'query' parameter is not set, read a query from stdin.
         /// The query is read entirely into memory (streaming is disabled).
-        ReadBufferFromFileDescriptor in(STDIN_FILENO);
+        ReadBufferFromFileDescriptor in(inFd);
         String text;
         readStringUntilEOF(text, in);
         if (query_fuzzer_runs)

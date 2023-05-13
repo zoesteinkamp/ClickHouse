@@ -82,6 +82,7 @@ protected:
         std::vector<Arguments> & hosts_and_ports_arguments) = 0;
 
     void addMultiquery(std::string_view query, Arguments & common_arguments) const;
+    void initUserProvidedQueryIdFormats() override;
 
 private:
     void parseAndCheckOptions(OptionsDescription & options_description, po::variables_map & options, Arguments & arguments);

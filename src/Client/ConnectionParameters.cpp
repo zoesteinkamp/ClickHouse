@@ -42,15 +42,15 @@ ConnectionParameters ConnectionParameters::createForEmbedded(const String & user
 }
 
 ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config,
+                                           const std::string & database,
                                            std::string connection_host,
                                            std::optional<UInt16> connection_port)
     : host(connection_host)
     , port(connection_port.value_or(getPortFromConfig(config)))
+    , default_database(database)
 {
     bool is_secure = config.getBool("secure", false);
     security = is_secure ? Protocol::Secure::Enable : Protocol::Secure::Disable;
-
-    default_database = config.getString("database", "");
 
     /// changed the default value to "default" to fix the issue when the user in the prompt is blank
     user = config.getString("user", "default");
@@ -99,8 +99,8 @@ ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfigurati
     timeouts.sync_request_timeout = Poco::Timespan(config.getInt("sync_request_timeout", DBMS_DEFAULT_SYNC_REQUEST_TIMEOUT_SEC), 0);
 }
 
-ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config)
-    : ConnectionParameters(config, config.getString("host", "localhost"), getPortFromConfig(config))
+ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database)
+    : ConnectionParameters(config, database, config.getString("host", "localhost"), getPortFromConfig(config))
 {
 }
 

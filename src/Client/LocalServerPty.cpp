@@ -7,6 +7,7 @@
 #include <Common/Exception.h>
 
 
+
 namespace DB
 {
 
@@ -15,6 +16,58 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
     extern const int CANNOT_LOAD_CONFIG;
     extern const int FILE_ALREADY_EXISTS;
+}
+
+
+String LocalServerPty::getEnvOption(const String & key, const String & defaultvalue)
+{
+    auto it = envVars.find(key);
+    return it == envVars.end() ? defaultvalue : it->second;
+}
+
+
+Int64 LocalServerPty::getEnvOptionInt64(const String & key, Int64 defaultvalue)
+{
+    auto raw = getEnvOption(key, "");
+    return raw.empty() ? defaultvalue : std::stoll(raw);
+}
+
+
+UInt64 LocalServerPty::getEnvOptionUInt64(const String & key, UInt64 defaultvalue)
+{
+    auto raw = getEnvOption(key, "");
+    return raw.empty() ? defaultvalue : std::stoull(raw);
+}
+
+
+int LocalServerPty::getEnvOptionInt(const String & key, int defaultvalue)
+{
+    auto raw = getEnvOption(key, "");
+    return raw.empty() ? defaultvalue : std::stoi(raw);
+}
+
+
+unsigned int LocalServerPty::getEnvOptionUInt(const String & key, unsigned int defaultvalue)
+{
+    auto raw = getEnvOption(key, "");
+    return raw.empty() ? defaultvalue : static_cast<unsigned int>(std::stoul(raw));
+}
+
+
+bool LocalServerPty::getEnvOptionBool(const String & key, bool defaultvalue)
+{
+    auto raw = getEnvOption(key, "");
+    if (raw.empty())
+    {
+        return defaultvalue;
+    }
+    if (raw == "true" || raw == "1") {
+        return true;
+    } else if (raw == "false" || raw == "0") {
+        return false;
+    } else {
+        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bad option provided for key {}", key);
+    }
 }
 
 
@@ -67,9 +120,13 @@ void LocalServerPty::connect()
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Error creating connection without session object");
     }
-    connection_parameters = ConnectionParameters::createForEmbedded(session->sessionContext()->getUserName(), session->sessionContext()->getCurrentDatabase());
+    connection_parameters = ConnectionParameters::createForEmbedded(session->sessionContext()->getUserName(), default_database);
     connection = LocalConnection::createConnection(
         connection_parameters, std::move(session), need_render_progress, need_render_profile_events, server_display_name);
+    if (!default_database.empty())
+    {
+        connection->setDefaultDatabase(default_database);
+    }
 }
 
 
@@ -77,8 +134,6 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
 {
     setThreadName("LocalServerPty");
     thread_status.emplace();
-
-    StackTrace::setShowAddresses(false);
 
     outputStream << std::fixed << std::setprecision(3);
     errorStream << std::fixed << std::setprecision(3);
@@ -88,36 +143,38 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
     delayed_interactive = false;
     if (!is_interactive || delayed_interactive)
     {
-        echo_queries = getConfig().hasOption("echo") || getConfig().hasOption("verbose");
-        ignore_error = getConfig().getBool("ignore-error", false);
+        echo_queries = getEnvOptionBool("echo", false) || getEnvOptionBool("verbose", false);
+        ignore_error = getEnvOptionBool("ignore_error", false);
         is_multiquery = true;
     }
-    print_stack_trace = getConfig().getBool("stacktrace", false);
-    load_suggestions = (is_interactive || delayed_interactive) && !getConfig().getBool("disable_suggestion", false);
+    print_stack_trace = getEnvOptionBool("stacktrace", false);
+    load_suggestions = (is_interactive || delayed_interactive) && !getEnvOptionBool("disable_suggestion", false);
+    if (load_suggestions)
+    {
+        suggestion_limit = getEnvOptionInt("suggestion_limit", 10000);
+    }
+
+    static_query = getEnvOption("query", "");
+
+    enable_highlight = getEnvOptionBool("highlight", true);
+    multiline = getEnvOptionBool("multiline", false);
+
+    default_database = getEnvOption("database", "");
 
 
-    format = getConfig().getString("output-format", getConfig().getString("format", is_interactive ? "PrettyCompact" : "TSV"));
+    format = getEnvOption("output-format", getEnvOption("format", is_interactive ? "PrettyCompact" : "TSV"));
     insert_format = "Values";
-
-    /// Setting value from cmd arg overrides one from config
-    if (global_context->getSettingsRef().max_insert_block_size.changed)
-    {
-        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
-    }
-    else
-    {
-        insert_format_max_block_size = getConfig().getUInt64("insert_format_max_block_size",
-            global_context->getSettingsRef().max_insert_block_size);
-    }
+    insert_format_max_block_size = getEnvOptionUInt64("insert_format_max_block_size",
+        global_context->getSettingsRef().max_insert_block_size);
 
 
 
-    server_display_name = getConfig().getString("display_name", getFQDNOrHostName());
-    prompt_by_server_display_name = getConfig().getRawString("prompt_by_server_display_name.default", "{display_name} :) ");
+    server_display_name = getEnvOption("display_name", getFQDNOrHostName());
+    prompt_by_server_display_name = getEnvOption("prompt_by_server_display_name", "{display_name} :) ");
     std::map<String, String> prompt_substitutions{{"display_name", server_display_name}};
     for (const auto & [key, value] : prompt_substitutions)
         boost::replace_all(prompt_by_server_display_name, "{" + key + "}", value);
-    initTtyBuffer(toProgressOption(getConfig().getString("progress", "default")));
+    initTtyBuffer(toProgressOption(getEnvOption("progress", "default")));
 
     if (is_interactive)
     {
@@ -143,10 +200,6 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
 
     cleanup();
     return 0;
-}
-
-void LocalServerPty::updateLoggerLevel(const String & )
-{
 }
 
 

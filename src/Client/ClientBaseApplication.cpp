@@ -130,6 +130,17 @@ void interruptSignalHandler(int signum)
 }
 
 
+void ClientBaseApplication::initUserProvidedQueryIdFormats()
+{
+    if (config().has("query_id_formats"))
+    {
+        Poco::Util::AbstractConfiguration::Keys keys;
+        config().keys("query_id_formats", keys);
+        for (const auto & name : keys)
+            query_id_formats.emplace_back(name + ":", config().getString("query_id_formats." + name));
+    }
+}
+
 
 ClientBaseApplication::~ClientBaseApplication() = default;
 
@@ -309,7 +320,6 @@ void ClientBaseApplication::addMultiquery(std::string_view query, Arguments & co
 
 void ClientBaseApplication::init(int argc, char ** argv)
 {
-    setApp();
     namespace po = boost::program_options;
 
     /// Don't parse options with Poco library, we prefer neat boost::program_options.

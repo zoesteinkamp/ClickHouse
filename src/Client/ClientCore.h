@@ -72,10 +72,6 @@ public:
     explicit ClientCore(int inFd_, int outFd_, int errFd_, std::istream& iStream, std::ostream& oStream, std::ostream& eStream);
     virtual ~ClientCore();
 
-    void setApp() { app = &Poco::Util::Application::instance(); }
-
-    Poco::Util::LayeredConfiguration& getConfig() const { return app->config(); }
-
     bool tryStopQuery() { return query_interrupt_handler.try_stop(); }
     void stopQuery() { return query_interrupt_handler.stop(); }
 
@@ -155,6 +151,7 @@ private:
     void updateSuggest(const ASTPtr & ast);
 
     void initQueryIdFormats();
+    virtual void initUserProvidedQueryIdFormats() {}
     bool addMergeTreeSettings(ASTCreateQuery & ast_create);
 
 protected:
@@ -182,7 +179,6 @@ protected:
 
     QueryInterruptHandler query_interrupt_handler;
 
-    Poco::Util::Application* app;
     static bool isSyncInsertWithData(const ASTInsertQuery & insert_query, const ContextPtr & context);
     bool processMultiQueryFromFile(const String & file_name);
 
@@ -192,6 +188,13 @@ protected:
     /// since other members can use them.
     SharedContextHolder shared_context;
     ContextMutablePtr global_context;
+
+    String default_database;
+    String query_id;
+    Int32 suggestion_limit;
+    bool enable_highlight = true;
+    bool multiline = false;
+    String static_query;
 
     bool is_interactive = false; /// Use either interactive line editing interface or batch mode.
     bool is_multiquery = false;
@@ -242,6 +245,7 @@ protected:
     ReadBufferFromFileDescriptor std_in;
     /// Console output.
     WriteBufferFromFileDescriptor std_out;
+    String pager;
     std::unique_ptr<ShellCommand> pager_cmd;
 
     /// The user can specify to redirect query output to a file.

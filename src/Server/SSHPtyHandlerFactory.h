@@ -1,3 +1,4 @@
+#pragma once
 #include <Server/SSHPtyHandler.h>
 #include <Server/TCPServer.h>
 #include <Server/TCPServerConnectionFactory.h>

@@ -12,25 +12,29 @@
 #include "Access/Credentials.h"
 #include "Access/SSHPublicKey.h"
 #include "Client/LocalServerPty.h"
+#include "Core/Names.h"
 #include "Server/SSH/SSHChannel.h"
 #include "Server/SSH/SSHEvent.h"
-#include "Server/TCPServer.h"
 
-namespace {
+namespace
+{
 
 /*
 Need to generate adapter functions, such for each member function, for example:
 
-class SessionCallback {
+class SessionCallback
+{
 For this:
-    ssh_channel channel_open(ssh_session session) {
+    ssh_channel channel_open(ssh_session session)
+    {
         channel = SSHChannel(session);
         return channel->get();
     }
 
 
 Generate this:
-    static ssh_channel channel_open_adapter(ssh_session session, void * userdata) {
+    static ssh_channel channel_open_adapter(ssh_session session, void * userdata)
+    {
         auto * self = static_cast<SessionCallback*>(userdata);
         return self->channel_open;
     }
@@ -67,6 +71,7 @@ public:
         channel_cb.channel_shell_request_function = shell_request_adapter<ssh_session, ssh_channel>;
         channel_cb.channel_data_function = data_function_adapter<ssh_session, ssh_channel, void *, uint32_t, int>;
         channel_cb.channel_pty_window_change_function = pty_resize_adapter<ssh_session, ssh_channel, int, int, int, int>;
+        channel_cb.channel_env_request_function = env_request_adapter<ssh_session, ssh_channel, const char *, const char*>;
         ssh_callbacks_init(&channel_cb) ssh_set_channel_callbacks(channel.get(), &channel_cb);
     }
 
@@ -88,12 +93,11 @@ public:
     std::unique_ptr<Session> dbSession;
     ThreadFromGlobalPool threadG;
     std::atomic_flag finished = ATOMIC_FLAG_INIT;
+    NameToNameMap env;
 
 private:
     int pty_request(ssh_session, ssh_channel, const char * term, int cols, int rows, int py, int px) noexcept
     {
-        std::cout << "pty_request\n";
-
         (void)term;
 
         winsize.ws_row = rows;
@@ -110,13 +114,13 @@ private:
         struct termios tios;
         if (tcgetattr(pty_slave, &tios) == -1)
         {
-            std::cout << "Error: Unable to get termios attributes" << std::endl;
+            std::cerr << "Error: Unable to get termios attributes" << std::endl;
             return SSH_ERROR;
         }
         tios.c_lflag &= ~ISIG;
         if (tcsetattr(pty_slave, TCSANOW, &tios) == -1)
         {
-            std::cout << "Error: Unable to set termios attributes" << std::endl;
+            std::cerr << "Error: Unable to set termios attributes" << std::endl;
             return SSH_ERROR;
         }
         // maybe initialize client here
@@ -168,7 +172,7 @@ private:
             boost::iostreams::stream<boost::iostreams::file_descriptor_sink> tty_output_stream(fd_sink);
             tty_output_stream << std::unitbuf;
             std::cout << "construct locaclserver\n";
-            auto local = DB::LocalServerPty(std::move(dbSession), std::string(pty_slave_name), pty_slave, tty_input_stream, tty_output_stream);
+            auto local = DB::LocalServerPty(std::move(dbSession), pty_slave, tty_input_stream, tty_output_stream, env);
             std::cout << "launch locaclserver\n";
             local.main({});
         }
@@ -205,6 +209,14 @@ private:
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, shell_request, int)
+
+    int env_request(ssh_session, ssh_channel, const char * env_name, const char * env_value)
+    {
+        env[env_name] = env_value;
+        return SSH_OK;
+    }
+
+    GENERATE_ADAPTER_FUNCTION(ChannelCallback, env_request, int)
 
 
     ssh_channel_callbacks_struct channel_cb = {};

@@ -1,3 +1,4 @@
+#pragma once
 #include <Poco/Net/StreamSocket.h>
 #include <Poco/Net/TCPServerConnection.h>
 #include "Server/IServer.h"

@@ -130,31 +130,33 @@ void LocalServerPty::connect()
 }
 
 
-int LocalServerPty::main(const std::vector<std::string> & /*args*/)
+int LocalServerPty::run()
+{
+try
 {
     setThreadName("LocalServerPty");
     thread_status.emplace();
 
+    print_stack_trace = getEnvOptionBool("stacktrace", false);
+
     outputStream << std::fixed << std::setprecision(3);
     errorStream << std::fixed << std::setprecision(3);
 
-
-    is_interactive = true;
-    delayed_interactive = false;
+    is_interactive = stdin_is_a_tty;
+    static_query = getEnvOption("query", "");
+    delayed_interactive = is_interactive && !static_query.empty();
     if (!is_interactive || delayed_interactive)
     {
         echo_queries = getEnvOptionBool("echo", false) || getEnvOptionBool("verbose", false);
         ignore_error = getEnvOptionBool("ignore_error", false);
         is_multiquery = true;
     }
-    print_stack_trace = getEnvOptionBool("stacktrace", false);
     load_suggestions = (is_interactive || delayed_interactive) && !getEnvOptionBool("disable_suggestion", false);
     if (load_suggestions)
     {
         suggestion_limit = getEnvOptionInt("suggestion_limit", 10000);
     }
 
-    static_query = getEnvOption("query", "");
 
     enable_highlight = getEnvOptionBool("highlight", true);
     multiline = getEnvOptionBool("multiline", false);
@@ -200,6 +202,21 @@ int LocalServerPty::main(const std::vector<std::string> & /*args*/)
 
     cleanup();
     return 0;
+}
+catch (const DB::Exception & e)
+{
+    cleanup();
+
+    errorStream << getExceptionMessage(e, print_stack_trace, true) << std::endl;
+    return e.code() ? e.code() : -1;
+}
+catch (...)
+{
+    cleanup();
+
+    errorStream << getCurrentExceptionMessage(false) << std::endl;
+    return getCurrentExceptionCode();
+}
 }
 
 

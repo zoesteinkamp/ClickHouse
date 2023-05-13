@@ -24,14 +24,17 @@ class LocalServerPty : public ClientCore
 {
 public:
     explicit LocalServerPty(
-        std::unique_ptr<Session> && session_, int ttyFd_, std::istream & iStream, std::ostream & oStream, const NameToNameMap & envVars_
+        std::unique_ptr<Session> && session_, int in_fd_, int out_fd_, int err_fd_,
+        std::istream & iStream, std::ostream & oStream, std::ostream & eStream,
+        const NameToNameMap & envVars_, const String & first_query = ""
     )
-        : ClientCore(ttyFd_, ttyFd_, ttyFd_, iStream, oStream, oStream), session(std::move(session_)), envVars(envVars_)
+        : ClientCore(in_fd_, out_fd_, err_fd_, iStream, oStream, eStream), session(std::move(session_)), envVars(envVars_)
     {
         global_context = session->makeSessionContext();
+        envVars["query"] = first_query;
     }
 
-    int main(const std::vector<String> & /*args*/);
+    int run();
 
     ~LocalServerPty() override { cleanup(); }
 

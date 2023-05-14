@@ -13,7 +13,9 @@ public:
     explicit SSHPtyHandler(IServer & server_, ssh::SSHSession && session_, const Poco::Net::StreamSocket & socket);
     void run() override;
 
+private:
     IServer & server;
+    Poco::Logger * log;
     ssh::SSHSession session;
 };
 

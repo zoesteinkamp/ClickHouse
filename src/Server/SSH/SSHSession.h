@@ -24,11 +24,11 @@ public:
 
     ssh_session get() const;
 
-    int connect();
+    void connect();
     void setPeerHost(const String & host);
     void setFd(int fd);
     void setTimeout(int timeout, int timeout_usec);
-    int handleKeyExchange();
+    void handleKeyExchange();
     void disconnect();
     String getError();
     bool hasFinished();

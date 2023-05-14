@@ -35,7 +35,8 @@ ssh_event SSHEvent::get() const
 
 void SSHEvent::add_session(ssh_session session)
 {
-    ssh_event_add_session(event_.get(), session);
+    if (ssh_event_add_session(event_.get(), session) == SSH_ERROR)
+        throw std::runtime_error("Error adding session to ssh event");
 }
 
 void SSHEvent::remove_session(ssh_session session)
@@ -45,7 +46,12 @@ void SSHEvent::remove_session(ssh_session session)
 
 int SSHEvent::poll(int timeout)
 {
-    return ssh_event_dopoll(event_.get(), timeout);
+    int rc = ssh_event_dopoll(event_.get(), timeout);
+    if (rc == SSH_ERROR)
+    {
+        throw std::runtime_error("Error on polling on ssh event");
+    }
+    return rc;
 }
 
 int SSHEvent::poll()
@@ -53,9 +59,10 @@ int SSHEvent::poll()
     return poll(-1);
 }
 
-int SSHEvent::add_fd(int fd, int events, ssh_event_callback cb, void * userdata)
+void SSHEvent::add_fd(int fd, int events, ssh_event_callback cb, void * userdata)
 {
-    return ssh_event_add_fd(event_.get(), fd, events, cb, userdata);
+    if (ssh_event_add_fd(event_.get(), fd, events, cb, userdata) == SSH_ERROR)
+        throw std::runtime_error("Error on adding custom file descriptor to ssh event");
 }
 
 void SSHEvent::remove_fd(socket_t fd)

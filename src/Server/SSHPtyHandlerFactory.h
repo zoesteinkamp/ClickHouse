@@ -24,12 +24,16 @@ private:
 
 public:
     explicit SSHPtyHandlerFactory(
-        IServer & server_, int serverSockFd, const String & rsaKey_, const String & ecdsaKey_, const String & ed25519Key_)
+        IServer & server_, int serverSockFd, const String & rsaKey, const String & ecdsaKey, const String & ed25519Key)
         : server(server_), log(&Poco::Logger::get("SSHHandlerFactory"))
     {
-        bind.setRSAKey(rsaKey_);
-        bind.setECDSAKey(ecdsaKey_);
-        bind.setED25519Key(ed25519Key_);
+        LOG_INFO(log, "Initializing sshbind");
+        if (!rsaKey.empty())
+            bind.setHostKey(rsaKey);
+        if (!ecdsaKey.empty())
+            bind.setHostKey(ecdsaKey);
+        if (!ed25519Key.empty())
+            bind.setHostKey(ed25519Key);
         bind.setFd(serverSockFd);
         bind.listen();
     }

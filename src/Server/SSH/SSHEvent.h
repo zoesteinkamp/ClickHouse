@@ -26,7 +26,7 @@ public:
     ssh_event get() const;
     void add_session(ssh_session session);
     void remove_session(ssh_session session);
-    int add_fd(int fd, int events, ssh_event_callback cb, void * userdata);
+    void add_fd(int fd, int events, ssh_event_callback cb, void * userdata);
     void remove_fd(int fd);
     int poll(int timeout);
     int poll();

@@ -17,6 +17,7 @@
 #include "Server/EmbeddedClient/PtyClientDescriptorSet.h"
 #include "Server/SSH/SSHChannel.h"
 #include "Server/SSH/SSHEvent.h"
+#include <Common/logger_useful.h>
 
 namespace
 {
@@ -68,7 +69,7 @@ public:
     using DescriptorSet = IClientDescriptorSet::DescriptorSet;
 
     explicit ChannelCallback(ssh::SSHChannel && channel_, std::unique_ptr<Session> && dbSession_)
-        : channel(std::move(channel_)), dbSession(std::move(dbSession_))
+        : channel(std::move(channel_)), dbSession(std::move(dbSession_)), log(&Poco::Logger::get("SSHChannelCallback"))
     {
         channel_cb.userdata = this;
         channel_cb.channel_pty_request_function = pty_request_adapter<ssh_session, ssh_channel, const char *, int, int, int, int>;
@@ -88,10 +89,12 @@ public:
     std::unique_ptr<Session> dbSession;
     NameToNameMap env;
     std::optional<EmbeddedClientRunner> client_runner;
+    Poco::Logger * log;
 
 private:
     int pty_request(ssh_session, ssh_channel, const char * term, int width, int height, int width_pixels, int height_pixels) noexcept
     {
+        LOG_TRACE(log, "Received pty request");
         if (!dbSession || client_runner.has_value())
             return SSH_ERROR;
         try
@@ -101,6 +104,7 @@ private:
         }
         catch (...)
         {
+            tryLogCurrentException(log, "Exception from creating pty");
             return SSH_ERROR;
         }
 
@@ -111,6 +115,7 @@ private:
 
     int pty_resize(ssh_session, ssh_channel, int width, int height, int width_pixels, int height_pixels) noexcept
     {
+        LOG_TRACE(log, "Received pty resize");
         if (!client_runner.has_value() || !client_runner->hasPty())
         {
             return SSH_ERROR;
@@ -123,6 +128,7 @@ private:
         }
         catch (...)
         {
+            tryLogCurrentException(log, "Exception from changing window size");
             return SSH_ERROR;
         }
     }
@@ -145,6 +151,7 @@ private:
 
     int shell_request(ssh_session, ssh_channel) noexcept
     {
+        LOG_TRACE(log, "Received shell request");
         if (!client_runner.has_value() || client_runner->hasStarted() || !client_runner->hasPty())
         {
             return SSH_ERROR;
@@ -158,6 +165,7 @@ private:
         }
         catch (...)
         {
+            tryLogCurrentException(log, "Exception from starting client");
             return SSH_ERROR;
         }
     }
@@ -166,6 +174,7 @@ private:
 
     int env_request(ssh_session, ssh_channel, const char * env_name, const char * env_value)
     {
+        LOG_TRACE(log, "Received env request");
         env[env_name] = env_value;
         return SSH_OK;
     }
@@ -185,6 +194,7 @@ private:
             }
             catch (...)
             {
+                tryLogCurrentException(log, "Exception from starting client with no pty");
                 return SSH_ERROR;
             }
         }
@@ -193,6 +203,7 @@ private:
 
     int exec_request(ssh_session, ssh_channel, const char * command)
     {
+        LOG_TRACE(log, "Received exec request");
         if (client_runner.has_value() && (client_runner->hasStarted() || !client_runner->hasPty()))
         {
             return SSH_ERROR;
@@ -207,6 +218,7 @@ private:
             }
             catch (...)
             {
+                tryLogCurrentException(log, "Exception from starting client with pre entered query");
                 return SSH_ERROR;
             }
         }
@@ -257,7 +269,7 @@ class SessionCallback
 {
 public:
     explicit SessionCallback(ssh::SSHSession & session, IServer & server, const Poco::Net::SocketAddress & address_)
-        : server_context(server.context()), peerAddress(address_)
+        : server_context(server.context()), peerAddress(address_), log(&Poco::Logger::get("SSHSessionCallback"))
     {
         server_cb.userdata = this;
         server_cb.auth_password_function = auth_password_adapter<ssh_session, const char*, const char*>;
@@ -273,10 +285,12 @@ public:
     DB::ContextMutablePtr server_context;
     Poco::Net::SocketAddress peerAddress;
     std::unique_ptr<ChannelCallback> channelCallback;
+    Poco::Logger * log;
 
 private:
     ssh_channel channel_open(ssh_session session) noexcept
     {
+        LOG_INFO(log, "Openning a channel");
         if (!dbSession)
         {
             return nullptr;
@@ -289,7 +303,7 @@ private:
         }
         catch (const std::runtime_error & err)
         {
-            std::cerr << err.what();
+            LOG_ERROR(log, "Error while opening channel: {}", err.what());
             return nullptr;
         }
     }
@@ -300,6 +314,7 @@ private:
     {
         try
         {
+            LOG_TRACE(log, "Authenticating with password");
             auto dbSessionCreated = std::make_unique<Session>(server_context, ClientInfo::Interface::LOCAL);
             String user_name(user), password(pass);
             dbSessionCreated->authenticate(user_name, password, peerAddress);
@@ -320,6 +335,7 @@ private:
     {
         try
         {
+            LOG_TRACE(log, "Authenticating with public key");
             auto dbSessionCreated = std::make_unique<Session>(server_context, ClientInfo::Interface::LOCAL);
             String user_name(user);
 
@@ -366,7 +382,9 @@ private:
 }
 
 SSHPtyHandler::SSHPtyHandler(IServer & server_, ssh::SSHSession && session_, const Poco::Net::StreamSocket & socket)
-    : Poco::Net::TCPServerConnection(socket), server(server_), session(std::move(session_))
+    : Poco::Net::TCPServerConnection(socket), server(server_)
+    , log(&Poco::Logger::get("SSHPtyHandler"))
+    , session(std::move(session_))
 {
 }
 
@@ -374,12 +392,7 @@ void SSHPtyHandler::run()
 {
     ssh::SSHEvent event;
     SessionCallback sdata(session, server, socket().peerAddress());
-    if (session.handleKeyExchange() != SSH_OK)
-    {
-        printf("error\n");
-        std::cerr << session.getError() << '\n';
-        return;
-    }
+    session.handleKeyExchange();
     event.add_session(session.get());
     int n = 0;
     while (!sdata.authenticated || !sdata.channelCallback)
@@ -391,12 +404,11 @@ void SSHPtyHandler::run()
             return;
         }
 
-        if (!server.isCancelled() && event.poll(100) == SSH_ERROR)
+        if (server.isCancelled())
         {
-            std::cout << "ERROR\n";
-            std::cerr << session.getError() << '\n';
             return;
         }
+        event.poll(100);
         n++;
     }
     bool fdsSet = false;
@@ -405,10 +417,7 @@ void SSHPtyHandler::run()
     {
         /* Poll the main event which takes care of the session, the channel and
          * even our child process's stdout/stderr (once it's started). */
-        if (event.poll(100) == SSH_ERROR)
-        {
-            sdata.channelCallback->channel.close();
-        }
+        event.poll(100);
 
         /* If child process's stdout/stderr has been registered with the event,
          * or the child process hasn't started yet, continue. */
@@ -422,40 +431,33 @@ void SSHPtyHandler::run()
         /* If stdout valid, add stdout to be monitored by the poll event. */
         if (sdata.channelCallback->client_input_output.out != -1)
         {
-            if (event.add_fd(sdata.channelCallback->client_input_output.out, POLLIN, process_stdout, sdata.channelCallback->channel.get()) != SSH_OK)
-            {
-                std::cerr << "Failed to register stdout to poll context\n";
-                sdata.channelCallback->channel.close();
-            }
+            event.add_fd(sdata.channelCallback->client_input_output.out, POLLIN, process_stdout, sdata.channelCallback->channel.get());
         }
         if (sdata.channelCallback->client_input_output.err != -1)
         {
-            if (event.add_fd(sdata.channelCallback->client_input_output.err, POLLIN, process_stderr, sdata.channelCallback->channel.get()) != SSH_OK)
-            {
-                std::cerr << "Failed to register stderr to poll context\n";
-                sdata.channelCallback->channel.close();
-            }
+            event.add_fd(sdata.channelCallback->client_input_output.err, POLLIN, process_stderr, sdata.channelCallback->channel.get());
         }
     } while (sdata.channelCallback->channel.isOpen() && !sdata.channelCallback->hasClientFinished() && !server.isCancelled());
-    std::cout << "exiting from loop\n";
-    std::cout << "Channel open: " << sdata.channelCallback->channel.isOpen() << " finished: " << sdata.channelCallback->hasClientFinished()
-              << " server cancelled: " << server.isCancelled() << "\n";
 
+    LOG_DEBUG(
+        log,
+        "Finishing connection with state: channel open: {}, embedded client finished: {}, server cancelled: {}",
+        sdata.channelCallback->channel.isOpen(), sdata.channelCallback->hasClientFinished(), server.isCancelled()
+    );
 
-    if (sdata.channelCallback->client_input_output.out != -1)
-        event.remove_fd(sdata.channelCallback->client_input_output.out);
-    if (sdata.channelCallback->client_input_output.err != -1)
-        event.remove_fd(sdata.channelCallback->client_input_output.err);
+    event.remove_fd(sdata.channelCallback->client_input_output.out);
+    event.remove_fd(sdata.channelCallback->client_input_output.err);
 
 
     sdata.channelCallback->channel.sendEof();
     sdata.channelCallback->channel.close();
+
     /* Wait up to 5 seconds for the client to terminate the session. */
     for (n = 0; n < 50 && !session.hasFinished(); n++)
     {
         event.poll(100);
     }
-    std::cout << "terminating client\n";
+    LOG_DEBUG(log, "Connection closed");
 }
 
 }

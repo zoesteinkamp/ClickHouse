@@ -27,12 +27,10 @@ public:
 
     ssh_bind get() const;
 
-    int setRSAKey(const std::string & rsakey);
-    int setECDSAKey(const std::string & ecdsakey);
-    int setED25519Key(const std::string & ed25519key);
+    void setHostKey(const std::string & key_path);
     void setFd(int fd);
-    int listen();
-    int acceptFd(ssh_session session, int fd);
+    void listen();
+    void acceptFd(ssh_session session, int fd);
     String getError();
 
 private:

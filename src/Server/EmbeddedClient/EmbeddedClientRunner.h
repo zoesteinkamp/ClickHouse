@@ -31,7 +31,7 @@ public:
     ~EmbeddedClientRunner();
 
     explicit EmbeddedClientRunner(std::unique_ptr<IClientDescriptorSet> && client_descriptor_, std::unique_ptr<Session> && dbSession_)
-        : client_descriptors(std::move(client_descriptor_)), dbSession(std::move(dbSession_))
+        : client_descriptors(std::move(client_descriptor_)), dbSession(std::move(dbSession_)), log(&Poco::Logger::get("EmbeddedClientRunner"))
     {
     }
 
@@ -45,6 +45,7 @@ private:
 
     ThreadFromGlobalPool client_thread;
     std::unique_ptr<Session> dbSession;
+    Poco::Logger * log;
     // LocalServerPty client;
 };
 }

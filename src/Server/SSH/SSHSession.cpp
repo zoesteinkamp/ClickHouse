@@ -1,5 +1,6 @@
 #include "SSHSession.h"
 #include <stdexcept>
+#include <fmt/format.h>
 #include "clibssh.h"
 
 namespace ssh
@@ -33,30 +34,54 @@ ssh_session SSHSession::get() const
     return session_.get();
 }
 
-int SSHSession::connect()
+void SSHSession::connect()
 {
-    return ssh_connect(session_.get());
+    int rc = ssh_connect(session_.get());
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed connecting in ssh session due due to {}", getError()));
+    }
 }
 
 void SSHSession::setPeerHost(const String & host)
 {
-    ssh_options_set(session_.get(), SSH_OPTIONS_HOST, host.c_str());
+    int rc = ssh_options_set(session_.get(), SSH_OPTIONS_HOST, host.c_str());
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed setting peer host option for ssh session due due to {}", getError()));
+    }
 }
 
 void SSHSession::setFd(int fd)
 {
-    ssh_options_set(session_.get(), SSH_OPTIONS_FD, &fd);
+    int rc = ssh_options_set(session_.get(), SSH_OPTIONS_FD, &fd);
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed setting fd option for ssh session due due to {}", getError()));
+    }
 }
 
 void SSHSession::setTimeout(int timeout, int timeout_usec)
 {
-    ssh_options_set(session_.get(), SSH_OPTIONS_TIMEOUT, &timeout);
-    ssh_options_set(session_.get(), SSH_OPTIONS_TIMEOUT_USEC, &timeout_usec);
+    int rc = ssh_options_set(session_.get(), SSH_OPTIONS_TIMEOUT, &timeout);
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed setting for ssh session due timeout option due to {}", getError()));
+    }
+    rc |= ssh_options_set(session_.get(), SSH_OPTIONS_TIMEOUT_USEC, &timeout_usec);
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed setting for ssh session due timeout_usec option due to {}", getError()));
+    }
 }
 
-int SSHSession::handleKeyExchange()
+void SSHSession::handleKeyExchange()
 {
-    return ssh_handle_key_exchange(session_.get());
+    int rc = ssh_handle_key_exchange(session_.get());
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed key exchange for ssh session due to {}", getError()));
+    }
 }
 
 void SSHSession::disconnect()

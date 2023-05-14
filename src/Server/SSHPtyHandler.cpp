@@ -1,6 +1,6 @@
 #include <atomic>
 #include <stdexcept>
-#include <Server/PTY/openpty.h>
+#include <Server/EmbeddedClient/openpty.h>
 #include <Server/SSH/clibssh.h>
 #include <Server/SSHPtyHandler.h>
 #include <boost/iostreams/device/file_descriptor.hpp>
@@ -8,12 +8,13 @@
 #include <sys/poll.h>
 #include <Poco/Net/StreamSocket.h>
 #include <Poco/Pipe.h>
-#include "Common/ThreadPool.h"
 #include "Access/Common/AuthenticationType.h"
 #include "Access/Credentials.h"
 #include "Access/SSHPublicKey.h"
-#include "Client/LocalServerPty.h"
 #include "Core/Names.h"
+#include "Server/EmbeddedClient/EmbeddedClientRunner.h"
+#include "Server/EmbeddedClient/IClientDescriptorSet.h"
+#include "Server/EmbeddedClient/PtyClientDescriptorSet.h"
 #include "Server/SSH/SSHChannel.h"
 #include "Server/SSH/SSHEvent.h"
 
@@ -64,6 +65,8 @@ namespace
 class ChannelCallback
 {
 public:
+    using DescriptorSet = IClientDescriptorSet::DescriptorSet;
+
     explicit ChannelCallback(ssh::SSHChannel && channel_, std::unique_ptr<Session> && dbSession_)
         : channel(std::move(channel_)), dbSession(std::move(dbSession_))
     {
@@ -77,77 +80,51 @@ public:
         ssh_callbacks_init(&channel_cb) ssh_set_channel_callbacks(channel.get(), &channel_cb);
     }
 
-    ~ChannelCallback()
-    {
-        if (threadG.joinable())
-        {
-            threadG.join();
-        }
-    }
+    bool hasClientFinished() { return client_runner.has_value() && client_runner->hasFinished(); }
 
-    int pty_master = -1;
-    int pty_slave = -1;
-    char pty_slave_name[256];
-    int child_stdin = -1;
-    int child_stdout = -1;
-    int child_stderr = -1;
-    std::optional<Poco::Pipe> pipe_in;
-    std::optional<Poco::Pipe> pipe_out;
-    std::optional<Poco::Pipe> pipe_err;
-    winsize winsize = {0, 0, 0, 0};
+
+    DescriptorSet client_input_output;
     ssh::SSHChannel channel;
     std::unique_ptr<Session> dbSession;
-    ThreadFromGlobalPool threadG;
-    std::atomic_flag finished = ATOMIC_FLAG_INIT;
     NameToNameMap env;
+    std::optional<EmbeddedClientRunner> client_runner;
 
 private:
-    int pty_request(ssh_session, ssh_channel, const char * term, int cols, int rows, int py, int px) noexcept
+    int pty_request(ssh_session, ssh_channel, const char * term, int width, int height, int width_pixels, int height_pixels) noexcept
     {
-        (void)term;
+        if (!dbSession || client_runner.has_value())
+            return SSH_ERROR;
+        try
+        {
+            auto client_descriptors = std::make_unique<PtyClientDescriptorSet>(String(term), width, height, width_pixels, height_pixels);
+            client_runner.emplace(std::move(client_descriptors), std::move(dbSession));
+        }
+        catch (...)
+        {
+            return SSH_ERROR;
+        }
 
-        winsize.ws_row = rows;
-        winsize.ws_col = cols;
-        winsize.ws_xpixel = px;
-        winsize.ws_ypixel = py;
-
-        if (openpty(&pty_master, &pty_slave, pty_slave_name, nullptr, &winsize) != 0)
-        {
-            std::cerr << "Failed to open pty\n";
-            return SSH_ERROR;
-        }
-        // disable signals from tty
-        struct termios tios;
-        if (tcgetattr(pty_slave, &tios) == -1)
-        {
-            std::cerr << "Error: Unable to get termios attributes" << std::endl;
-            return SSH_ERROR;
-        }
-        tios.c_lflag &= ~ISIG;
-        if (tcsetattr(pty_slave, TCSANOW, &tios) == -1)
-        {
-            std::cerr << "Error: Unable to set termios attributes" << std::endl;
-            return SSH_ERROR;
-        }
-        // maybe initialize client here
         return SSH_OK;
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, pty_request, int)
 
-    int pty_resize(ssh_session, ssh_channel, int cols, int rows, int py, int px) noexcept
+    int pty_resize(ssh_session, ssh_channel, int width, int height, int width_pixels, int height_pixels) noexcept
     {
-        winsize.ws_row = rows;
-        winsize.ws_col = cols;
-        winsize.ws_xpixel = px;
-        winsize.ws_ypixel = py;
-
-        if (pty_master != -1)
+        if (!client_runner.has_value() || !client_runner->hasPty())
         {
-            return ioctl(pty_master, TIOCSWINSZ, &winsize);
+            return SSH_ERROR;
         }
 
-        return SSH_ERROR;
+        try
+        {
+            client_runner->changeWindowSize(width, height, width_pixels, height_pixels);
+            return SSH_OK;
+        }
+        catch (...)
+        {
+            return SSH_ERROR;
+        }
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, pty_resize, int)
@@ -156,63 +133,33 @@ private:
     {
         (void)is_stderr;
 
-        if (len == 0 || child_stdin == -1)
+        if (len == 0 || client_input_output.in == -1)
         {
             return 0;
         }
 
-        return static_cast<int>(write(child_stdin, data, len));
+        return static_cast<int>(write(client_input_output.in, data, len));
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, data_function, int)
 
-    void client_execution(int in_fd, int out_fd, int err_fd, String starting_query)
-    {
-        try
-        {
-            std::cout << "starting query " << starting_query << std::endl;
-            // Create file_descriptor_source and file_descriptor_sink objects
-            boost::iostreams::file_descriptor_source fd_source(in_fd, boost::iostreams::never_close_handle);
-            boost::iostreams::file_descriptor_sink fd_sink(out_fd, boost::iostreams::never_close_handle);
-            boost::iostreams::file_descriptor_sink fd_sink_err(err_fd, boost::iostreams::never_close_handle);
-            // Create a boost::iostreams::stream object using the source and sink
-            boost::iostreams::stream<boost::iostreams::file_descriptor_source> input_stream(fd_source);
-            boost::iostreams::stream<boost::iostreams::file_descriptor_sink> output_stream(fd_sink);
-            boost::iostreams::stream<boost::iostreams::file_descriptor_sink> output_stream_err(fd_sink_err);
-            output_stream << std::unitbuf;
-            output_stream_err << std::unitbuf;
-
-            std::cout << "construct locaclserver\n";
-            auto local = DB::LocalServerPty(std::move(dbSession), in_fd, out_fd, err_fd, input_stream, output_stream, output_stream_err, env, starting_query);
-            std::cout << "launch locaclserver\n";
-            local.run();
-        }
-        catch (...)
-        {
-            std::cerr << "Some Error in client\n";
-        }
-        std::cout << "exiting...\n";
-        finished.test_and_set();
-        char c = 0;
-        // wake up polling side
-        write(out_fd, &c, 1);
-    }
-
     int shell_request(ssh_session, ssh_channel) noexcept
     {
-        if (child_stdout > 0)
+        if (!client_runner.has_value() || client_runner->hasStarted() || !client_runner->hasPty())
         {
             return SSH_ERROR;
         }
 
-        if (pty_master != -1 && pty_slave != -1 && dbSession)
+        try
         {
-            threadG = ThreadFromGlobalPool(&ChannelCallback::client_execution, this, pty_slave, pty_slave, pty_slave, "");
-            /* pty fd is bi-directional */
-            child_stdout = child_stdin = pty_master;
+            client_runner->run(env);
+            client_input_output = client_runner->getDescriptorsForServer();
             return SSH_OK;
         }
-        return SSH_ERROR;
+        catch (...)
+        {
+            return SSH_ERROR;
+        }
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, shell_request, int)
@@ -227,33 +174,41 @@ private:
 
     int exec_nopty(const String & command)
     {
-        pipe_in = Poco::Pipe();
-        pipe_out = Poco::Pipe();
-        pipe_err = Poco::Pipe();
-
         if (dbSession)
         {
-            threadG = ThreadFromGlobalPool(&ChannelCallback::client_execution, this, pipe_in->readHandle(), pipe_out->writeHandle(), pipe_err->writeHandle(), command);
-            child_stdin = pipe_in->writeHandle();
-            child_stdout = pipe_out->readHandle();
-            child_stderr = pipe_err->readHandle();
-            return SSH_OK;
+            try
+            {
+                auto client_descriptors = std::make_unique<PipeClientDescriptorSet>();
+                client_runner.emplace(std::move(client_descriptors), std::move(dbSession));
+                client_runner->run(env, command);
+                client_input_output = client_runner->getDescriptorsForServer();
+            }
+            catch (...)
+            {
+                return SSH_ERROR;
+            }
         }
-        return SSH_ERROR;
+        return SSH_OK;
     }
 
     int exec_request(ssh_session, ssh_channel, const char * command)
     {
-        if (child_stdout > 0 || !dbSession)
+        if (client_runner.has_value() && (client_runner->hasStarted() || !client_runner->hasPty()))
         {
             return SSH_ERROR;
         }
-        if (pty_master > 0 && pty_slave > 0)
+        if (client_runner.has_value())
         {
-            threadG = ThreadFromGlobalPool(&ChannelCallback::client_execution, this, pty_slave, pty_slave, pty_slave, String(command));
-            /* pty fd is bi-directional */
-            child_stdout = child_stdin = pty_master;
-            return SSH_OK;
+            try
+            {
+                client_runner->run(env, command);
+                client_input_output = client_runner->getDescriptorsForServer();
+                return SSH_OK;
+            }
+            catch (...)
+            {
+                return SSH_ERROR;
+            }
         }
         return exec_nopty(String(command));
     }
@@ -454,59 +409,53 @@ void SSHPtyHandler::run()
         {
             sdata.channelCallback->channel.close();
         }
-        // std::cout<< "Wake up\n";
 
         /* If child process's stdout/stderr has been registered with the event,
          * or the child process hasn't started yet, continue. */
-        if (fdsSet || sdata.channelCallback->child_stdout == -1)
+        if (fdsSet || sdata.channelCallback->client_input_output.out == -1)
         {
             continue;
         }
         /* Executed only once, once the child process starts. */
         fdsSet = true;
+
         /* If stdout valid, add stdout to be monitored by the poll event. */
-        if (sdata.channelCallback->child_stdout != -1)
+        if (sdata.channelCallback->client_input_output.out != -1)
         {
-            if (event.add_fd(sdata.channelCallback->child_stdout, POLLIN, process_stdout, sdata.channelCallback->channel.get()) != SSH_OK)
+            if (event.add_fd(sdata.channelCallback->client_input_output.out, POLLIN, process_stdout, sdata.channelCallback->channel.get()) != SSH_OK)
             {
                 std::cerr << "Failed to register stdout to poll context\n";
                 sdata.channelCallback->channel.close();
             }
         }
-        if (sdata.channelCallback->child_stderr != -1)
+        if (sdata.channelCallback->client_input_output.err != -1)
         {
-            if (event.add_fd(sdata.channelCallback->child_stderr, POLLIN, process_stderr, sdata.channelCallback->channel.get()) != SSH_OK)
+            if (event.add_fd(sdata.channelCallback->client_input_output.err, POLLIN, process_stderr, sdata.channelCallback->channel.get()) != SSH_OK)
             {
                 std::cerr << "Failed to register stderr to poll context\n";
                 sdata.channelCallback->channel.close();
             }
         }
-    } while (sdata.channelCallback->channel.isOpen() && !sdata.channelCallback->finished.test() && !server.isCancelled());
+    } while (sdata.channelCallback->channel.isOpen() && !sdata.channelCallback->hasClientFinished() && !server.isCancelled());
     std::cout << "exiting from loop\n";
-    std::cout << "Channel open: " << sdata.channelCallback->channel.isOpen() << " finished: " << sdata.channelCallback->finished.test()
+    std::cout << "Channel open: " << sdata.channelCallback->channel.isOpen() << " finished: " << sdata.channelCallback->hasClientFinished()
               << " server cancelled: " << server.isCancelled() << "\n";
 
-    close(sdata.channelCallback->pty_master);
-    close(sdata.channelCallback->pty_slave);
-    if (sdata.channelCallback->pipe_in.has_value())
-    {
-        sdata.channelCallback->pipe_in.reset();
-        sdata.channelCallback->pipe_out.reset();
-        sdata.channelCallback->pipe_err.reset();
-    }
 
-    event.remove_fd(sdata.channelCallback->child_stdout);
-    event.remove_fd(sdata.channelCallback->child_stderr);
+    if (sdata.channelCallback->client_input_output.out != -1)
+        event.remove_fd(sdata.channelCallback->client_input_output.out);
+    if (sdata.channelCallback->client_input_output.err != -1)
+        event.remove_fd(sdata.channelCallback->client_input_output.err);
 
 
     sdata.channelCallback->channel.sendEof();
     sdata.channelCallback->channel.close();
-
     /* Wait up to 5 seconds for the client to terminate the session. */
     for (n = 0; n < 50 && !session.hasFinished(); n++)
     {
         event.poll(100);
     }
+    std::cout << "terminating client\n";
 }
 
 }

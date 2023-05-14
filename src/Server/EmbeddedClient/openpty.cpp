@@ -2,7 +2,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
-#include <Server/PTY/openpty.h>
+#include <Server/EmbeddedClient/openpty.h>
 #include <sys/ioctl.h>
 
 int openpty(int * amaster, int * aslave, char * name, const struct termios * termp, const struct winsize * winp)

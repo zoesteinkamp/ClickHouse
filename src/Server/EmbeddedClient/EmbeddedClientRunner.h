@@ -1,0 +1,50 @@
+#pragma once
+
+#include <stdexcept>
+#include <Client/LocalServerPty.h>
+#include <Server/EmbeddedClient/IClientDescriptorSet.h>
+#include <Server/EmbeddedClient/PipeClientDescriptorSet.h>
+#include <Server/EmbeddedClient/PtyClientDescriptorSet.h>
+#include <Common/ThreadPool.h>
+
+
+namespace DB
+{
+
+class EmbeddedClientRunner
+{
+public:
+    bool hasStarted() { return started.test(); }
+
+    bool hasFinished() { return finished.test(); }
+
+    // void stopQuery() { client.stopQuery(); } // this is save for client untill he uses thread-safe structures to handle query stopping
+
+    void run(const NameToNameMap & envs, const String & starting_query = "");
+
+    IClientDescriptorSet::DescriptorSet getDescriptorsForServer() { return client_descriptors->getDescriptorsForServer(); }
+
+    bool hasPty() const { return client_descriptors->isPty(); }
+
+    void changeWindowSize(int width, int height, int width_pixels, int height_pixels);
+
+    ~EmbeddedClientRunner();
+
+    explicit EmbeddedClientRunner(std::unique_ptr<IClientDescriptorSet> && client_descriptor_, std::unique_ptr<Session> && dbSession_)
+        : client_descriptors(std::move(client_descriptor_)), dbSession(std::move(dbSession_))
+    {
+    }
+
+private:
+    void clientRoutine(NameToNameMap envs, String starting_query);
+
+    std::unique_ptr<IClientDescriptorSet>
+        client_descriptors; // This is used by server thread and client thread, be sure that server only gets them via getDescriptorsForServer
+    std::atomic_flag started = ATOMIC_FLAG_INIT;
+    std::atomic_flag finished = ATOMIC_FLAG_INIT;
+
+    ThreadFromGlobalPool client_thread;
+    std::unique_ptr<Session> dbSession;
+    // LocalServerPty client;
+};
+}

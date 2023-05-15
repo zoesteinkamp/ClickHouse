@@ -238,7 +238,8 @@ static std::string getCanonicalPath(std::string && path)
 }
 
 
-Server::Server() {
+Server::Server()
+{
 #if USE_SSL
     ssh::LibSSHInitializer::instance();
     ssh::libsshLogger::initialize();

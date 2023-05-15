@@ -5,7 +5,6 @@ namespace ssh
 
 LibSSHInitializer::LibSSHInitializer()
 {
-    std::cout << "Init libssh\n";
     int rc = ssh_init();
     if (rc != SSH_OK)
     {

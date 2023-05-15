@@ -49,7 +49,8 @@ private:
         void safeClose()
         {
             if (fd != -1)
-                close(fd);
+                if (close(fd) != 0)
+                    abort();
             fd = -1;
         }
 

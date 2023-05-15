@@ -25,11 +25,6 @@ namespace po = boost::program_options;
 namespace DB
 {
 
-namespace ErrorCodes
-{
-    extern const int NOT_IMPLEMENTED;
-}
-
 
 void interruptSignalHandler(int signum);
 

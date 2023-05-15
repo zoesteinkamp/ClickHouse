@@ -18,7 +18,7 @@ public:
 
     bool hasFinished() { return finished.test(); }
 
-    // void stopQuery() { client.stopQuery(); } // this is save for client untill he uses thread-safe structures to handle query stopping
+    // void stopQuery() { client.stopQuery(); } // this is save for client until he uses thread-safe structures to handle query stopping
 
     void run(const NameToNameMap & envs, const String & starting_query = "");
 

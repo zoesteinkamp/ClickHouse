@@ -255,9 +255,11 @@ int process_stderr(socket_t fd, int revents, void * userdata)
     int n = -1;
     ssh_channel channel = static_cast<ssh_channel>(userdata);
 
-    if (channel != nullptr && (revents & POLLIN) != 0) {
+    if (channel != nullptr && (revents & POLLIN) != 0)
+    {
         n = static_cast<int>(read(fd, buf, 1024));
-        if (n > 0) {
+        if (n > 0)
+        {
             ssh_channel_write_stderr(channel, buf, n);
         }
     }
@@ -290,7 +292,7 @@ public:
 private:
     ssh_channel channel_open(ssh_session session) noexcept
     {
-        LOG_INFO(log, "Openning a channel");
+        LOG_INFO(log, "Opening a channel");
         if (!dbSession)
         {
             return nullptr;
@@ -343,7 +345,7 @@ private:
             if (signature_state == SSH_PUBLICKEY_STATE_NONE)
             {
                 // This is the case when user wants to check if he is able to use this type of authentication.
-                // Also here we may check if the key is assosiated with the user, but current session
+                // Also here we may check if the key is associated with the user, but current session
                 // authentication mechanism doesn't support it.
                 if (dbSessionCreated->getAuthenticationType(user_name) != AuthenticationType::SSH_KEY)
                 {
@@ -358,7 +360,7 @@ private:
                 return SSH_AUTH_DENIED;
             }
 
-            // The signature is checked, so just verify that user is assosiated with publickey.
+            // The signature is checked, so just verify that user is associated with publickey.
             // Function will throw if authentication fails.
             dbSessionCreated->authenticate(SSHKeyPlainCredentials{user_name, ssh::SSHPublicKey::createNonOwning(key)}, peerAddress);
 

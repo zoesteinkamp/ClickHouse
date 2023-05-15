@@ -343,9 +343,9 @@ protected:
 
     bool logging_initialized = false;
 
-    std::ostream& outputStream = std::cout;
-    std::ostream& errorStream = std::cerr;
-    std::istream& inputStream = std::cin;
+    std::ostream& outputStream;
+    std::ostream& errorStream;
+    std::istream& inputStream;
     int inFd = STDIN_FILENO;
     int outFd = STDOUT_FILENO;
     int errFd = STDERR_FILENO;

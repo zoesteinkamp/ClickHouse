@@ -81,11 +81,6 @@ namespace fs = std::filesystem;
 using namespace std::literals;
 
 
-namespace CurrentMetrics
-{
-    extern const Metric MemoryTracking;
-}
-
 namespace DB
 {
 
@@ -102,7 +97,6 @@ namespace ErrorCodes
     extern const int INCORRECT_FILE_NAME;
     extern const int INVALID_USAGE_OF_INPUT;
     extern const int CANNOT_SET_SIGNAL_HANDLER;
-    extern const int UNRECOGNIZED_ARGUMENTS;
     extern const int LOGICAL_ERROR;
     extern const int CANNOT_OPEN_FILE;
     extern const int FILE_ALREADY_EXISTS;
@@ -1353,7 +1347,7 @@ void ClientCore::processInsertQuery(const String & query_to_execute, ASTPtr pars
         else
             return;
     }
-    // Validate infile before we pass furhter, as some files may be unsafe if client is embedded into server
+    // Validate infile before we pass further, as some files may be unsafe if client is embedded into server
     if (global_context->getApplicationType() == Context::ApplicationType::SERVER && parsed_insert_query.infile)
     {
         const auto & in_file_node = parsed_insert_query.infile->as<ASTLiteral &>();

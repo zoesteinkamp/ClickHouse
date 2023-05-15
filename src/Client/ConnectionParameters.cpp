@@ -21,7 +21,8 @@ namespace ErrorCodes
     extern const int BAD_ARGUMENTS;
 }
 
-ConnectionParameters ConnectionParameters::createForEmbedded(const String & user, const String & database) {
+ConnectionParameters ConnectionParameters::createForEmbedded(const String & user, const String & database)
+{
     auto connection_params = ConnectionParameters();
     connection_params.host = "localhost";
     connection_params.security = Protocol::Secure::Disable;

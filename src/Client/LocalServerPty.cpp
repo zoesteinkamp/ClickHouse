@@ -7,15 +7,13 @@
 #include <Common/Exception.h>
 
 
-
 namespace DB
 {
 
 namespace ErrorCodes
 {
     extern const int BAD_ARGUMENTS;
-    extern const int CANNOT_LOAD_CONFIG;
-    extern const int FILE_ALREADY_EXISTS;
+    extern const int LOGICAL_ERROR;
 }
 
 namespace
@@ -63,11 +61,16 @@ bool getEnvOptionBool(const NameToNameMap & envVars, const String & key, bool de
     {
         return defaultvalue;
     }
-    if (raw == "true" || raw == "1") {
+    if (raw == "true" || raw == "1")
+    {
         return true;
-    } else if (raw == "false" || raw == "0") {
+    }
+    else if (raw == "false" || raw == "0")
+    {
         return false;
-    } else {
+    }
+    else
+    {
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bad option provided for key {}", key);
     }
 }
@@ -102,7 +105,6 @@ void LocalServerPty::processError(const String &) const
             client_exception->rethrow();
     }
 }
-
 
 
 void LocalServerPty::cleanup()
@@ -172,7 +174,6 @@ try
     insert_format = "Values";
     insert_format_max_block_size = getEnvOptionUInt64(envVars, "insert_format_max_block_size",
         global_context->getSettingsRef().max_insert_block_size);
-
 
 
     server_display_name = getEnvOption(envVars, "display_name", getFQDNOrHostName());

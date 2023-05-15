@@ -1,12 +1,12 @@
 #pragma once
-#include <Server/SSHPtyHandler.h>
+#include <Server/SSH/SSHPtyHandler.h>
 #include <Server/TCPServer.h>
 #include <Server/TCPServerConnectionFactory.h>
 #include <Poco/Util/AbstractConfiguration.h>
 #include "Common/Exception.h"
 #include <Common/logger_useful.h>
 #include "Server/IServer.h"
-#include "Server/SSH/LibSSHLogger.h"
+#include "Common/SSH/LibSSHLogger.h"
 #include "Server/SSH/SSHBind.h"
 #include "Server/SSH/SSHSession.h"
 

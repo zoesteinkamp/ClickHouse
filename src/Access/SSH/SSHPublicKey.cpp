@@ -1,6 +1,6 @@
 #include <stdexcept>
-#include <Access/SSHPublicKey.h>
-#include <Server/SSH/clibssh.h>
+#include <Access/SSH/SSHPublicKey.h>
+#include <Common/SSH/clibssh.h>
 
 namespace ssh
 {

@@ -132,10 +132,6 @@
     -->
     <tcp_port>9000</tcp_port>
 
-    <tcp_port_ssh>9022</tcp_port_ssh>
-    <ssh>
-        <host_rsa_key>ssh_host_rsa_key</host_rsa_key>
-    </ssh>
     <!-- Compatibility with MySQL protocol.
          ClickHouse will pretend to be MySQL for applications connecting to this port.
     -->

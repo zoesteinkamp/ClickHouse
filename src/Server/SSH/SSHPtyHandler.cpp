@@ -1,8 +1,8 @@
 #include <atomic>
 #include <stdexcept>
 #include <Server/EmbeddedClient/openpty.h>
-#include <Server/SSH/clibssh.h>
-#include <Server/SSHPtyHandler.h>
+#include <Common/SSH/clibssh.h>
+#include <Server/SSH/SSHPtyHandler.h>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <sys/poll.h>
@@ -10,7 +10,7 @@
 #include <Poco/Pipe.h>
 #include "Access/Common/AuthenticationType.h"
 #include "Access/Credentials.h"
-#include "Access/SSHPublicKey.h"
+#include "Access/SSH/SSHPublicKey.h"
 #include "Core/Names.h"
 #include "Server/EmbeddedClient/EmbeddedClientRunner.h"
 #include "Server/EmbeddedClient/IClientDescriptorSet.h"

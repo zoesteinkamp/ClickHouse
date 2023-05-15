@@ -12,7 +12,6 @@
 #include <Common/StringUtils/StringUtils.h>
 #include <Common/quoteString.h>
 #include <Common/TransformEndianness.hpp>
-#include "Access/SSHPublicKey.h"
 #include <Core/Settings.h>
 #include <Interpreters/executeQuery.h>
 #include <Parsers/Access/ASTGrantQuery.h>
@@ -28,6 +27,11 @@
 #include <filesystem>
 #include <base/FnTraits.h>
 
+#include "config.h"
+#if USE_SSL
+    #include <Access/SSH/SSHPublicKey.h>
+#endif
+
 
 namespace DB
 {
@@ -37,6 +41,7 @@ namespace ErrorCodes
     extern const int UNKNOWN_ADDRESS_PATTERN_TYPE;
     extern const int THERE_IS_NO_PROFILE;
     extern const int NOT_IMPLEMENTED;
+    extern const int SUPPORT_IS_DISABLED;
 }
 
 namespace
@@ -204,6 +209,7 @@ namespace
         }
         else if (has_ssh_keys)
         {
+#if USE_SSL
             user->auth_data = AuthenticationData{AuthenticationType::SSH_KEY};
 
             // User can specify multiple public keys, that can be used for authentication
@@ -232,6 +238,9 @@ namespace
                     throw Exception(ErrorCodes::BAD_ARGUMENTS, "Unknown ssh_key entry pattern type: {}", entry);
             }
             user->auth_data.setSshKeys(std::move(keys));
+#else
+            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "SSH support disabled as clickhouse was built without openssl");
+#endif
     }
 
         auto auth_type = user->auth_data.getType();

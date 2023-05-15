@@ -104,7 +104,10 @@ bool operator ==(const AuthenticationData & lhs, const AuthenticationData & rhs)
     return (lhs.type == rhs.type) && (lhs.password_hash == rhs.password_hash)
         && (lhs.ldap_server_name == rhs.ldap_server_name) && (lhs.kerberos_realm == rhs.kerberos_realm)
         && (lhs.ssl_certificate_common_names == rhs.ssl_certificate_common_names)
-        && (lhs.ssh_keys == rhs.ssh_keys);
+#if USE_SSL
+        && (lhs.ssh_keys == rhs.ssh_keys)
+#endif
+        ;
 }
 
 
@@ -321,10 +324,14 @@ std::shared_ptr<ASTAuthenticationData> AuthenticationData::toAST() const
         }
         case AuthenticationType::SSH_KEY:
         {
+#if USE_SSL
             for (const auto & key : getSshKeys())
                 node->children.push_back(std::make_shared<ASTLiteral>(key.getBase64Representation()));
 
             break;
+#else
+            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "SSH support disabled as ClickHouse was built without OpenSSL");
+#endif
         }
 
         case AuthenticationType::NO_PASSWORD: [[fallthrough]];

@@ -570,7 +570,7 @@ try
                     flags |= O_CREAT;
 
                 out_file_buf = wrapWriteBufferWithCompressionMethod(
-                    std::make_unique<WriteBufferFromFile>(out_file, flags),
+                    std::make_unique<WriteBufferFromFile>(out_file, DBMS_DEFAULT_BUFFER_SIZE, flags),
                     compression_method,
                     static_cast<int>(compression_level)
                 );

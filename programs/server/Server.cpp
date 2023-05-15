@@ -111,9 +111,9 @@
 #if USE_SSL
 #    include <Poco/Net/SecureServerSocket.h>
 #    include <Server/CertificateReloader.h>
-#    include <Server/SSHPtyHandlerFactory.h>
-#    include "Server/SSH/LibSSHInitializer.h"
-#    include "Server/SSH/LibSSHLogger.h"
+#    include <Server/SSH/SSHPtyHandlerFactory.h>
+#    include <Common/SSH/LibSSHInitializer.h>
+#    include <Common/SSH/LibSSHLogger.h>
 #endif
 
 #if USE_GRPC
@@ -2256,7 +2256,7 @@ void Server::createServers(
                         new Poco::Net::TCPServerParams));
 #else
             UNUSED(port);
-            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "SSL support for TCP protocol is disabled because Poco library was built without NetSSL support.");
+            throw Exception(ErrorCodes::SUPPORT_IS_DISABLED, "SSH protocol is disabled for ClickHouse, as it has been built without OpenSSL");
 #endif
             });
 

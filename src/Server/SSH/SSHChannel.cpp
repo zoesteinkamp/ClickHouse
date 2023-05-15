@@ -1,6 +1,6 @@
 #include "SSHChannel.h"
 #include <stdexcept>
-#include "clibssh.h"
+#include <Common/SSH/clibssh.h>
 
 namespace ssh
 {

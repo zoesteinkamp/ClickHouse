@@ -6,7 +6,10 @@
 
 #include <base/types.h>
 #include <boost/container/flat_set.hpp>
-#include "Access/SSHPublicKey.h"
+#include "config.h"
+#if USE_SSL
+    #include <Access/SSH/SSHPublicKey.h>
+#endif
 #include <vector>
 
 namespace DB
@@ -58,8 +61,10 @@ public:
     const boost::container::flat_set<String> & getSSLCertificateCommonNames() const { return ssl_certificate_common_names; }
     void setSSLCertificateCommonNames(boost::container::flat_set<String> common_names_);
 
+#if USE_SSL
     const std::vector<ssh::SSHPublicKey> & getSshKeys() const { return ssh_keys; }
     void setSshKeys(std::vector<ssh::SSHPublicKey> && ssh_keys_) { ssh_keys = std::move(ssh_keys_); }
+#endif
 
     friend bool operator ==(const AuthenticationData & lhs, const AuthenticationData & rhs);
     friend bool operator !=(const AuthenticationData & lhs, const AuthenticationData & rhs) { return !(lhs == rhs); }
@@ -87,7 +92,9 @@ private:
     String kerberos_realm;
     boost::container::flat_set<String> ssl_certificate_common_names;
     String salt;
+#if USE_SSL
     std::vector<ssh::SSHPublicKey> ssh_keys;
+#endif
 };
 
 }

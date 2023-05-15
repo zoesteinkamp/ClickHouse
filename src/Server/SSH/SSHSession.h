@@ -24,6 +24,7 @@ public:
 
     ssh_session get() const;
 
+    void disableDefaultConfig();
     void connect();
     void setPeerHost(const String & host);
     void setFd(int fd);

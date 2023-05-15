@@ -43,6 +43,16 @@ void SSHSession::connect()
     }
 }
 
+void SSHSession::disableDefaultConfig()
+{
+    bool enable = false;
+    int rc = ssh_options_set(session_.get(), SSH_OPTIONS_PROCESS_CONFIG, &enable);
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed disabling default config for ssh session due due to {}", getError()));
+    }
+}
+
 void SSHSession::setPeerHost(const String & host)
 {
     int rc = ssh_options_set(session_.get(), SSH_OPTIONS_HOST, host.c_str());

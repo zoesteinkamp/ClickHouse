@@ -2245,14 +2245,12 @@ void Server::createServers(
 #if USE_SSL
                 Poco::Net::ServerSocket socket;
                 auto address = socketBindListen(config, socket, listen_host, port, /* secure = */ false);
-                // socket.setReceiveTimeout(settings.receive_timeout);
-                // socket.setSendTimeout(settings.send_timeout);
                 return ProtocolServerAdapter(
                     listen_host,
                     port_name,
                     "SSH pty: " + address.toString(),
                     std::make_unique<TCPServer>(
-                        new SSHPtyHandlerFactory(*this, socket.sockfd(), "ssh_host_rsa_key", "", ""),
+                        new SSHPtyHandlerFactory(*this, socket.sockfd(), config),
                         server_pool,
                         socket,
                         new Poco::Net::TCPServerParams));

@@ -2341,7 +2341,7 @@ void ClientCore::runInteractive()
 #if USE_REPLXX
     if (global_context->getApplicationType() == Context::ApplicationType::SERVER)
     {
-        lr = std::make_unique<LineReader>(history_file, false, query_extenders, query_delimiters, inputStream, outputStream, inFd);
+        lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, inputStream, outputStream, inFd);
     }
     else
     {

@@ -381,10 +381,22 @@ private:
 
 }
 
-SSHPtyHandler::SSHPtyHandler(IServer & server_, ssh::SSHSession && session_, const Poco::Net::StreamSocket & socket)
-    : Poco::Net::TCPServerConnection(socket), server(server_)
+SSHPtyHandler::SSHPtyHandler(
+    IServer & server_,
+    ssh::SSHSession && session_,
+    const Poco::Net::StreamSocket & socket,
+    unsigned int max_auth_attempts_,
+    unsigned int auth_timeout_seconds_,
+    unsigned int finish_timeout_seconds_,
+    unsigned int event_poll_interval_milliseconds_)
+    : Poco::Net::TCPServerConnection(socket)
+    , server(server_)
     , log(&Poco::Logger::get("SSHPtyHandler"))
     , session(std::move(session_))
+    , max_auth_attempts(max_auth_attempts_)
+    , auth_timeout_seconds(auth_timeout_seconds_)
+    , finish_timeout_seconds(finish_timeout_seconds_)
+    , event_poll_interval_milliseconds(event_poll_interval_milliseconds_)
 {
 }
 
@@ -394,12 +406,13 @@ void SSHPtyHandler::run()
     SessionCallback sdata(session, server, socket().peerAddress());
     session.handleKeyExchange();
     event.add_session(session.get());
+    int max_iterations = auth_timeout_seconds * 1000 / event_poll_interval_milliseconds;
     int n = 0;
     while (!sdata.authenticated || !sdata.channelCallback)
     {
         /* If the user has used up all attempts, or if he hasn't been able to
          * authenticate in 10 seconds (n * 100ms), disconnect. */
-        if (sdata.auth_attempts >= 3 || n >= 100)
+        if (sdata.auth_attempts >= max_auth_attempts || n >= max_iterations)
         {
             return;
         }
@@ -408,7 +421,7 @@ void SSHPtyHandler::run()
         {
             return;
         }
-        event.poll(100);
+        event.poll(event_poll_interval_milliseconds);
         n++;
     }
     bool fdsSet = false;
@@ -417,7 +430,7 @@ void SSHPtyHandler::run()
     {
         /* Poll the main event which takes care of the session, the channel and
          * even our child process's stdout/stderr (once it's started). */
-        event.poll(100);
+        event.poll(event_poll_interval_milliseconds);
 
         /* If child process's stdout/stderr has been registered with the event,
          * or the child process hasn't started yet, continue. */
@@ -453,9 +466,10 @@ void SSHPtyHandler::run()
     sdata.channelCallback->channel.close();
 
     /* Wait up to 5 seconds for the client to terminate the session. */
-    for (n = 0; n < 50 && !session.hasFinished(); n++)
+    max_iterations = finish_timeout_seconds * 1000 / event_poll_interval_milliseconds;
+    for (n = 0; n < max_iterations && !session.hasFinished(); n++)
     {
-        event.poll(100);
+        event.poll(event_poll_interval_milliseconds);
     }
     LOG_DEBUG(log, "Connection closed");
 }

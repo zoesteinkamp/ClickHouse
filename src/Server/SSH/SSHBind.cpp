@@ -40,9 +40,17 @@ void SSHBind::setHostKey(const std::string & key_path)
         throw std::invalid_argument(fmt::format("Failed setting host key in sshbind due to {}", getError()));
 }
 
+
 String SSHBind::getError()
 {
     return String(ssh_get_error(bind_.get()));
+}
+
+void SSHBind::disableDefaultConfig()
+{
+    bool enable = false;
+    if (ssh_bind_options_set(bind_.get(), SSH_BIND_OPTIONS_PROCESS_CONFIG, &enable) != SSH_OK)
+        throw std::runtime_error(fmt::format("Failed disabling default config in sshbind due to {}", getError()));
 }
 
 void SSHBind::setFd(int fd)

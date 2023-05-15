@@ -27,6 +27,7 @@ public:
 
     ssh_bind get() const;
 
+    void disableDefaultConfig();
     void setHostKey(const std::string & key_path);
     void setFd(int fd);
     void listen();

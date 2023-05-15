@@ -1,4 +1,5 @@
 #include "LibSSHInitializer.h"
+#include <stdexcept>
 
 namespace ssh
 {

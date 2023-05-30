@@ -63,7 +63,7 @@ bool LineReader::hasInputData() const
     timeval timeout = {0, 0};
     fd_set fds{};
     FD_ZERO(&fds);
-    FD_SET(inFd, &fds);
+    FD_SET(in_fd, &fds);
     return select(1, &fds, nullptr, nullptr, &timeout) == 1;
 }
 
@@ -137,15 +137,15 @@ void LineReader::Suggest::addWords(Words && new_words) // NOLINT(cppcoreguidelin
 
 LineReader::LineReader(
     const String & history_file_path_, bool multiline_, Patterns extenders_, Patterns delimiters_,
-    std::istream& inputStream_, std::ostream& outputStream_, int inFd_
+    std::istream & input_stream_, std::ostream & output_stream_, int in_fd_
 )
     : history_file_path(history_file_path_)
     , multiline(multiline_)
     , extenders(std::move(extenders_))
     , delimiters(std::move(delimiters_))
-    , inputStream(inputStream_)
-    , outputStream(outputStream_)
-    , inFd(inFd_)
+    , input_stream(input_stream_)
+    , output_stream(output_stream_)
+    , in_fd(in_fd_)
 {
     /// FIXME: check extender != delimiter
 }
@@ -222,9 +222,9 @@ LineReader::InputStatus LineReader::readOneLine(const String & prompt)
     input.clear();
 
     {
-        outputStream << prompt;
-        std::getline(inputStream, input);
-        if (!inputStream.good())
+        output_stream << prompt;
+        std::getline(input_stream, input);
+        if (!input_stream.good())
             return ABORT;
     }
 

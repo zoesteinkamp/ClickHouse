@@ -41,8 +41,8 @@ public:
 
     LineReader(
         const String & history_file_path, bool multiline, Patterns extenders, Patterns delimiters,
-        std::istream& inputStream_ = std::cin, std::ostream& outputStream_ = std::cout,
-        int inFd_ = STDIN_FILENO
+        std::istream & input_stream_ = std::cin, std::ostream & output_stream_ = std::cout,
+        int in_fd_ = STDIN_FILENO
     );
     virtual ~LineReader() = default;
 
@@ -86,9 +86,9 @@ protected:
     virtual InputStatus readOneLine(const String & prompt);
     virtual void addToHistory(const String &) {}
 
-    std::istream& inputStream;
-    std::ostream& outputStream;
-    int inFd;
+    std::istream & input_stream;
+    std::ostream & output_stream;
+    int in_fd;
 };
 
 }

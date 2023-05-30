@@ -24,17 +24,17 @@ public:
     SSHEvent & operator=(SSHEvent &&) noexcept;
 
     ssh_event get() const;
-    void add_session(ssh_session session);
-    void remove_session(ssh_session session);
-    void add_fd(int fd, int events, ssh_event_callback cb, void * userdata);
-    void remove_fd(int fd);
+    void addSession(ssh_session session);
+    void removeSession(ssh_session session);
+    void addFd(int fd, int events, ssh_event_callback cb, void * userdata);
+    void removeFd(int fd);
     int poll(int timeout);
     int poll();
 
 private:
     static void deleter(ssh_event e);
 
-    std::unique_ptr<ssh_event_struct, decltype(&deleter)> event_;
+    std::unique_ptr<ssh_event_struct, decltype(&deleter)> event;
 };
 
 }

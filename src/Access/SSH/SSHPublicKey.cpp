@@ -5,9 +5,9 @@
 namespace ssh
 {
 
-SSHPublicKey::SSHPublicKey(ssh_key key, bool own) : key_(key, own ? &deleter : &disabled_deleter)
+SSHPublicKey::SSHPublicKey(ssh_key key_, bool own) : key(key_, own ? &deleter : &disabledDeleter)
 { // disable deleter if class is constructed without ownership
-    if (!key_)
+    if (!key)
     {
         throw std::logic_error("No ssh_key provided in explicit constructor");
     }
@@ -15,9 +15,9 @@ SSHPublicKey::SSHPublicKey(ssh_key key, bool own) : key_(key, own ? &deleter : &
 
 SSHPublicKey::~SSHPublicKey() = default;
 
-SSHPublicKey::SSHPublicKey(const SSHPublicKey & other) : key_(ssh_key_dup(other.get()), &deleter)
+SSHPublicKey::SSHPublicKey(const SSHPublicKey & other) : key(ssh_key_dup(other.get()), &deleter)
 {
-    if (!key_)
+    if (!key)
     {
         throw std::runtime_error("Failed to duplicate ssh_key");
     }
@@ -27,12 +27,12 @@ SSHPublicKey & SSHPublicKey::operator=(const SSHPublicKey & other)
 {
     if (this != &other)
     {
-        ssh_key newKey = ssh_key_dup(other.get());
-        if (!newKey)
+        ssh_key new_key = ssh_key_dup(other.get());
+        if (!new_key)
         {
             throw std::runtime_error("Failed to duplicate ssh_key");
         }
-        key_.reset(newKey);
+        key.reset(new_key);
     }
     return *this;
 }
@@ -48,19 +48,19 @@ bool SSHPublicKey::operator==(const SSHPublicKey & other) const
 
 ssh_key SSHPublicKey::get() const
 {
-    return key_.get();
+    return key.get();
 }
 
 bool SSHPublicKey::isEqual(const SSHPublicKey & other) const
 {
-    int rc = ssh_key_cmp(key_.get(), other.get(), SSH_KEY_CMP_PUBLIC);
+    int rc = ssh_key_cmp(key.get(), other.get(), SSH_KEY_CMP_PUBLIC);
     return rc == 0;
 }
 
-SSHPublicKey SSHPublicKey::createFromBase64(const String & base64, const String & keyType)
+SSHPublicKey SSHPublicKey::createFromBase64(const String & base64, const String & key_type)
 {
     ssh_key key;
-    int rc = ssh_pki_import_pubkey_base64(base64.c_str(), ssh_key_type_from_name(keyType.c_str()), &key);
+    int rc = ssh_pki_import_pubkey_base64(base64.c_str(), ssh_key_type_from_name(key_type.c_str()), &key);
     if (rc != SSH_OK)
     {
         throw std::invalid_argument("Bad ssh public key provided");
@@ -101,7 +101,7 @@ namespace
 String SSHPublicKey::getBase64Representation() const
 {
     char * buf = nullptr;
-    int rc = ssh_pki_export_pubkey_base64(key_.get(), &buf);
+    int rc = ssh_pki_export_pubkey_base64(key.get(), &buf);
 
     if (rc != SSH_OK)
     {

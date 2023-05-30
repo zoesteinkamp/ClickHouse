@@ -14,8 +14,8 @@ public:
 
     static LibSSHInitializer & instance()
     {
-        static LibSSHInitializer _instance;
-        return _instance;
+        static LibSSHInitializer instance;
+        return instance;
     }
 
     ~LibSSHInitializer();

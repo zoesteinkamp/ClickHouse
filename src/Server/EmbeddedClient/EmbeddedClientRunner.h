@@ -1,7 +1,7 @@
 #pragma once
 
 #include <stdexcept>
-#include <Client/LocalServerPty.h>
+#include <Server/EmbeddedClient/EmbeddedClient.h>
 #include <Server/EmbeddedClient/IClientDescriptorSet.h>
 #include <Server/EmbeddedClient/PipeClientDescriptorSet.h>
 #include <Server/EmbeddedClient/PtyClientDescriptorSet.h>
@@ -31,7 +31,7 @@ public:
     ~EmbeddedClientRunner();
 
     explicit EmbeddedClientRunner(std::unique_ptr<IClientDescriptorSet> && client_descriptor_, std::unique_ptr<Session> && dbSession_)
-        : client_descriptors(std::move(client_descriptor_)), dbSession(std::move(dbSession_)), log(&Poco::Logger::get("EmbeddedClientRunner"))
+        : client_descriptors(std::move(client_descriptor_)), db_session(std::move(dbSession_)), log(&Poco::Logger::get("EmbeddedClientRunner"))
     {
     }
 
@@ -44,7 +44,7 @@ private:
     std::atomic_flag finished = ATOMIC_FLAG_INIT;
 
     ThreadFromGlobalPool client_thread;
-    std::unique_ptr<Session> dbSession;
+    std::unique_ptr<Session> db_session;
     Poco::Logger * log;
     // LocalServerPty client;
 };

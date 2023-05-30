@@ -69,10 +69,11 @@ class ClientCore
 public:
     using Arguments = std::vector<String>;
 
-    explicit ClientCore(int inFd_, int outFd_, int errFd_, std::istream& iStream, std::ostream& oStream, std::ostream& eStream);
+    explicit ClientCore(
+        int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_);
     virtual ~ClientCore();
 
-    bool tryStopQuery() { return query_interrupt_handler.try_stop(); }
+    bool tryStopQuery() { return query_interrupt_handler.tryStop(); }
     void stopQuery() { return query_interrupt_handler.stop(); }
 
 
@@ -168,11 +169,11 @@ protected:
 
         /// Return true if the query was stopped.
         /// Query was stopped if it received at least "signals_before_stop" interrupt signals.
-        bool try_stop() { return exit_after_signals.fetch_sub(1) <= 0; }
+        bool tryStop() { return exit_after_signals.fetch_sub(1) <= 0; }
         bool cancelled() { return exit_after_signals.load() <= 0; }
 
         /// Return how much interrupt signals remain before stop.
-        Int32 cancelled_status() { return exit_after_signals.load(); }
+        Int32 cancelledStatus() { return exit_after_signals.load(); }
     private:
         std::atomic<Int32> exit_after_signals = 0;
     };
@@ -343,12 +344,12 @@ protected:
 
     bool logging_initialized = false;
 
-    std::ostream& outputStream;
-    std::ostream& errorStream;
-    std::istream& inputStream;
-    int inFd = STDIN_FILENO;
-    int outFd = STDOUT_FILENO;
-    int errFd = STDERR_FILENO;
+    std::ostream & output_stream;
+    std::ostream & error_stream;
+    std::istream & input_stream;
+    int in_fd = STDIN_FILENO;
+    int out_fd = STDOUT_FILENO;
+    int err_fd = STDERR_FILENO;
 };
 
 }

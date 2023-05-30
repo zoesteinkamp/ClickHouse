@@ -23,12 +23,12 @@ void EmbeddedClientRunner::run(const NameToNameMap & envs, const String & starti
 
 void EmbeddedClientRunner::changeWindowSize(int width, int height, int width_pixels, int height_pixels)
 {
-    auto * ptyDescriptors = dynamic_cast<PtyClientDescriptorSet *>(client_descriptors.get());
-    if (ptyDescriptors == nullptr)
+    auto * pty_descriptors = dynamic_cast<PtyClientDescriptorSet *>(client_descriptors.get());
+    if (pty_descriptors == nullptr)
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Accessing window change on non pty descriptors");
     }
-    ptyDescriptors->changeWindowSize(width, height, width_pixels, height_pixels);
+    pty_descriptors->changeWindowSize(width, height, width_pixels, height_pixels);
 }
 
 EmbeddedClientRunner::~EmbeddedClientRunner()
@@ -48,7 +48,7 @@ void EmbeddedClientRunner::clientRoutine(NameToNameMap envs, String starting_que
     {
         auto descr = client_descriptors->getDescriptorsForClient();
         auto stre = client_descriptors->getStreamsForClient();
-        LocalServerPty client(std::move(dbSession), descr.in, descr.out, descr.err, stre.in, stre.out, stre.err);
+        EmbeddedClient client(std::move(db_session), descr.in, descr.out, descr.err, stre.in, stre.out, stre.err);
         client.run(envs, starting_query);
     }
     catch (...)

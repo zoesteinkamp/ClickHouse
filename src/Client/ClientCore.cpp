@@ -252,21 +252,22 @@ public:
 };
 
 
-ClientCore::ClientCore(int inFd_, int outFd_, int errFd_, std::istream & iStream, std::ostream & oStream, std::ostream & eStream)
-    : std_in(inFd_)
-    , std_out(outFd_)
-    , progress_indication(oStream, inFd_, errFd_)
-    , outputStream(oStream)
-    , errorStream(eStream)
-    , inputStream(iStream)
-    , inFd(inFd_)
-    , outFd(outFd_)
-    , errFd(errFd_)
+ClientCore::ClientCore(
+    int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_)
+    : std_in(in_fd_)
+    , std_out(out_fd_)
+    , progress_indication(output_stream_, in_fd_, err_fd_)
+    , output_stream(output_stream_)
+    , error_stream(error_stream_)
+    , input_stream(input_stream_)
+    , in_fd(in_fd_)
+    , out_fd(out_fd_)
+    , err_fd(err_fd_)
 {
-    stdin_is_a_tty = isatty(inFd);
-    stdout_is_a_tty = isatty(outFd);
-    stderr_is_a_tty = isatty(errFd);
-    terminal_width = getTerminalWidth(inFd, errFd);
+    stdin_is_a_tty = isatty(in_fd);
+    stdout_is_a_tty = isatty(out_fd);
+    stderr_is_a_tty = isatty(err_fd);
+    terminal_width = getTerminalWidth(in_fd, err_fd);
 }
 
 
@@ -300,7 +301,7 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
 
         if (!res)
         {
-            errorStream << std::endl << message << std::endl << std::endl;
+            error_stream << std::endl << message << std::endl << std::endl;
             return nullptr;
         }
     }
@@ -311,11 +312,11 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
 
     if (is_interactive)
     {
-        outputStream << std::endl;
-        WriteBufferFromOStream res_buf(outputStream, 4096);
+        output_stream << std::endl;
+        WriteBufferFromOStream res_buf(output_stream, 4096);
         formatAST(*res, res_buf);
         res_buf.finalize();
-        outputStream << std::endl << std::endl;
+        output_stream << std::endl << std::endl;
     }
 
     return res;
@@ -440,7 +441,7 @@ void ClientCore::onData(Block & block, ASTPtr parsed_query)
     if (need_render_progress && tty_buf)
     {
         if (select_into_file && !select_into_file_and_stdout)
-            errorStream << "\r";
+            error_stream << "\r";
         progress_indication.writeProgress(*tty_buf);
     }
 }
@@ -526,7 +527,7 @@ try
         {
             if (query_with_output->out_file && is_embedded)
             {
-                errorStream << "Out files are disabled, if you are running client embedded into server. Ignoring this option.\n";
+                error_stream << "Out files are disabled when you are running client embedded into server. Ignoring this option.\n";
             }
             String out_file;
             if (query_with_output->out_file && !is_embedded)
@@ -573,7 +574,7 @@ try
                 {
                     select_into_file_and_stdout = true;
                     out_file_buf = std::make_unique<ForkWriteBuffer>(std::vector<WriteBufferPtr>{std::move(out_file_buf),
-                            std::make_shared<WriteBufferFromFileDescriptor>(outFd)});
+                            std::make_shared<WriteBufferFromFileDescriptor>(out_fd)});
                 }
 
                 // We are writing to file, so default format is the same as in non-interactive mode.
@@ -633,7 +634,7 @@ void ClientCore::initLogsOutputStream()
             if (server_logs_file.empty())
             {
                 /// Use stderr by default
-                out_logs_buf = std::make_unique<WriteBufferFromFileDescriptor>(errFd);
+                out_logs_buf = std::make_unique<WriteBufferFromFileDescriptor>(err_fd);
                 wb = out_logs_buf.get();
                 color_logs = stderr_is_a_tty;
             }
@@ -676,12 +677,11 @@ void ClientCore::initTtyBuffer(ProgressOption progress)
     // So it's easier to just pass a descriptor, without the terminal name.
     if (global_context->getApplicationType() == Context::ApplicationType::SERVER)
     {
-         tty_buf = std::make_unique<WriteBufferFromFileDescriptor>(outFd, buf_size);
+         tty_buf = std::make_unique<WriteBufferFromFileDescriptor>(out_fd, buf_size);
          return;
     }
 
     static constexpr auto tty_file_name = "/dev/tty";
-
 
     if (is_interactive || progress == ProgressOption::TTY)
     {
@@ -718,7 +718,7 @@ void ClientCore::initTtyBuffer(ProgressOption progress)
 
     if (stderr_is_a_tty || progress == ProgressOption::ERR)
     {
-        tty_buf = std::make_unique<WriteBufferFromFileDescriptor>(errFd, buf_size);
+        tty_buf = std::make_unique<WriteBufferFromFileDescriptor>(err_fd, buf_size);
     }
     else
         need_render_progress = false;
@@ -956,7 +956,7 @@ void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr pa
             /// has been received yet.
             if (processed_rows == 0 && e.code() == ErrorCodes::DEADLOCK_AVOIDED && --retries_left)
             {
-                errorStream << "Got a transient error from the server, will"
+                error_stream << "Got a transient error from the server, will"
                         << " retry (" << retries_left << " retries left)";
             }
             else
@@ -995,7 +995,7 @@ void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
             /// to avoid losing sync.
             if (!cancelled)
             {
-                if (partial_result_on_first_cancel && query_interrupt_handler.cancelled_status() == signals_before_stop - 1)
+                if (partial_result_on_first_cancel && query_interrupt_handler.cancelledStatus() == signals_before_stop - 1)
                 {
                     connection->sendCancel();
                     /// First cancel reading request was sent. Next requests will only be with a full cancel
@@ -1010,7 +1010,7 @@ void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
                     double elapsed = receive_watch.elapsedSeconds();
                     if (break_on_timeout && elapsed > receive_timeout.totalSeconds())
                     {
-                        outputStream << "Timeout exceeded while receiving data from server."
+                        output_stream << "Timeout exceeded while receiving data from server."
                                     << " Waited for " << static_cast<size_t>(elapsed) << " seconds,"
                                     << " timeout is " << receive_timeout.totalSeconds() << " seconds." << std::endl;
 
@@ -1044,7 +1044,7 @@ void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
         std::rethrow_exception(local_format_error);
 
     if (cancelled && is_interactive)
-        outputStream << "Query was cancelled." << std::endl;
+        output_stream << "Query was cancelled." << std::endl;
 }
 
 
@@ -1159,7 +1159,7 @@ void ClientCore::onEndOfStream()
     resetOutput();
 
     if (is_interactive && !written_first_block)
-        outputStream << "Ok." << std::endl;
+        output_stream << "Ok." << std::endl;
 }
 
 
@@ -1701,7 +1701,7 @@ void ClientCore::cancelQuery()
         progress_indication.clearProgressOutput(*tty_buf);
 
     if (is_interactive)
-        outputStream << "Cancelling query." << std::endl;
+        output_stream << "Cancelling query." << std::endl;
 
     cancelled = true;
 }
@@ -1869,20 +1869,20 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
 
     if (is_interactive)
     {
-        outputStream << std::endl
+        output_stream << std::endl
             << processed_rows << " row" << (processed_rows == 1 ? "" : "s")
             << " in set. Elapsed: " << progress_indication.elapsedSeconds() << " sec. ";
         progress_indication.writeFinalProgress();
-        outputStream << std::endl << std::endl;
+        output_stream << std::endl << std::endl;
     }
     else if (print_time_to_stderr)
     {
-        errorStream << progress_indication.elapsedSeconds() << "\n";
+        error_stream << progress_indication.elapsedSeconds() << "\n";
     }
 
     if (!is_interactive && print_num_processed_rows)
     {
-        outputStream << "Processed rows: " << processed_rows << "\n";
+        output_stream << "Processed rows: " << processed_rows << "\n";
     }
 
     if (have_error && report_error)
@@ -2103,13 +2103,13 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
                         if (!server_exception)
                         {
                             error_matches_hint = false;
-                            errorStream << fmt::format("Expected server error code '{}' but got no server error (query: {}).\n",
+                            error_stream << fmt::format("Expected server error code '{}' but got no server error (query: {}).\n",
                                        test_hint.serverErrors(), full_query);
                         }
                         else if (!test_hint.hasExpectedServerError(server_exception->code()))
                         {
                             error_matches_hint = false;
-                            errorStream << fmt::format("Expected server error code: {} but got: {} (query: {}).\n",
+                            error_stream << fmt::format("Expected server error code: {} but got: {} (query: {}).\n",
                                               test_hint.serverErrors(), server_exception->code(), full_query);
                         }
                     }
@@ -2118,13 +2118,13 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
                         if (!client_exception)
                         {
                             error_matches_hint = false;
-                            errorStream << fmt::format("Expected client error code '{}' but got no client error (query: {}).\n",
+                            error_stream << fmt::format("Expected client error code '{}' but got no client error (query: {}).\n",
                                        test_hint.clientErrors(), full_query);
                         }
                         else if (!test_hint.hasExpectedClientError(client_exception->code()))
                         {
                             error_matches_hint = false;
-                            errorStream << fmt::format("Expected client error code '{}' but got '{}' (query: {}).\n",
+                            error_stream << fmt::format("Expected client error code '{}' but got '{}' (query: {}).\n",
                                        test_hint.clientErrors(), client_exception->code(), full_query);
                         }
                     }
@@ -2141,14 +2141,14 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
                     if (test_hint.hasClientErrors())
                     {
                         error_matches_hint = false;
-                        errorStream << fmt::format(
+                        error_stream << fmt::format(
                                    "The query succeeded but the client error '{}' was expected (query: {}).\n",
                                    test_hint.clientErrors(), full_query);
                     }
                     if (test_hint.hasServerErrors())
                     {
                         error_matches_hint = false;
-                        errorStream << fmt::format(
+                        error_stream << fmt::format(
                                    "The query succeeded but the server error '{}' was expected (query: {}).\n",
                                    test_hint.serverErrors(), full_query);
                     }
@@ -2335,7 +2335,7 @@ void ClientCore::runInteractive()
 #if USE_REPLXX
     if (global_context->getApplicationType() == Context::ApplicationType::SERVER)
     {
-        lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, inputStream, outputStream, inFd);
+        lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
     }
     else
     {
@@ -2346,7 +2346,7 @@ void ClientCore::runInteractive()
         lr = std::make_unique<ReplxxLineReader>(*suggest, history_file, multiline, query_extenders, query_delimiters, word_break_characters, highlight_callback);
     }
 #else
-    lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, inputStream, outputStream, inFd);
+    lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
 #endif
 
     /// Enable bracketed-paste-mode so that we are able to paste multiline queries as a whole.
@@ -2438,7 +2438,7 @@ void ClientCore::runInteractive()
         catch (const Exception & e)
         {
             /// We don't need to handle the test hints in the interactive mode.
-            errorStream << "Exception on client:" << std::endl << getExceptionMessage(e, print_stack_trace, true) << std::endl << std::endl;
+            error_stream << "Exception on client:" << std::endl << getExceptionMessage(e, print_stack_trace, true) << std::endl << std::endl;
             client_exception.reset(e.clone());
         }
 
@@ -2455,11 +2455,11 @@ void ClientCore::runInteractive()
     while (true);
 
     if (isNewYearMode())
-        outputStream << "Happy new year." << std::endl;
+        output_stream << "Happy new year." << std::endl;
     else if (isChineseNewYearMode(local_tz))
-        outputStream << "Happy Chinese new year. 春节快乐!" << std::endl;
+        output_stream << "Happy Chinese new year. 春节快乐!" << std::endl;
     else
-        outputStream << "Bye." << std::endl;
+        output_stream << "Bye." << std::endl;
 }
 
 
@@ -2514,7 +2514,7 @@ void ClientCore::runNonInteractive()
     {
         /// If 'query' parameter is not set, read a query from stdin.
         /// The query is read entirely into memory (streaming is disabled).
-        ReadBufferFromFileDescriptor in(inFd);
+        ReadBufferFromFileDescriptor in(in_fd);
         String text;
         readStringUntilEOF(text, in);
         if (query_fuzzer_runs)
@@ -2531,13 +2531,13 @@ void ClientCore::clearTerminal()
     /// It is needed if garbage is left in terminal.
     /// Show cursor. It can be left hidden by invocation of previous programs.
     /// A test for this feature: perl -e 'print "x"x100000'; echo -ne '\033[0;0H\033[?25l'; clickhouse-client
-    outputStream << "\033[0J" "\033[?25h";
+    output_stream << "\033[0J" "\033[?25h";
 }
 
 
 void ClientCore::showClientVersion()
 {
-    outputStream << VERSION_NAME << " " + getName() + " version " << VERSION_STRING << VERSION_OFFICIAL << "." << std::endl;
+    output_stream << VERSION_NAME << " " + getName() + " version " << VERSION_STRING << VERSION_OFFICIAL << "." << std::endl;
 }
 
 }

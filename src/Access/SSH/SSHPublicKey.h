@@ -32,7 +32,7 @@ public:
 
     String getBase64Representation() const;
 
-    static SSHPublicKey createFromBase64(const String & base64, const String & keyType);
+    static SSHPublicKey createFromBase64(const String & base64, const String & key_type);
 
     static SSHPublicKey createFromFile(const String & filename);
 
@@ -46,9 +46,9 @@ private:
     static void deleter(ssh_key key);
 
     // We may want to not own ssh_key memory, so then we pass this deleter to unique_ptr
-    static void disabled_deleter(ssh_key) { }
+    static void disabledDeleter(ssh_key) { }
 
-    std::unique_ptr<ssh_key_struct, decltype(&deleter)> key_;
+    std::unique_ptr<ssh_key_struct, decltype(&deleter)> key;
 };
 
 }

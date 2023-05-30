@@ -5,9 +5,9 @@
 namespace ssh
 {
 
-SSHEvent::SSHEvent() : event_(ssh_event_new(), &deleter)
+SSHEvent::SSHEvent() : event(ssh_event_new(), &deleter)
 {
-    if (!event_)
+    if (!event)
     {
         throw std::runtime_error("Failed to create ssh_event");
     }
@@ -15,7 +15,7 @@ SSHEvent::SSHEvent() : event_(ssh_event_new(), &deleter)
 
 SSHEvent::~SSHEvent() = default;
 
-SSHEvent::SSHEvent(SSHEvent && other) noexcept : event_(std::move(other.event_))
+SSHEvent::SSHEvent(SSHEvent && other) noexcept : event(std::move(other.event))
 {
 }
 
@@ -23,30 +23,30 @@ SSHEvent & SSHEvent::operator=(SSHEvent && other) noexcept
 {
     if (this != &other)
     {
-        event_ = std::move(other.event_);
+        event = std::move(other.event);
     }
     return *this;
 }
 
 ssh_event SSHEvent::get() const
 {
-    return event_.get();
+    return event.get();
 }
 
-void SSHEvent::add_session(ssh_session session)
+void SSHEvent::addSession(ssh_session session)
 {
-    if (ssh_event_add_session(event_.get(), session) == SSH_ERROR)
+    if (ssh_event_add_session(event.get(), session) == SSH_ERROR)
         throw std::runtime_error("Error adding session to ssh event");
 }
 
-void SSHEvent::remove_session(ssh_session session)
+void SSHEvent::removeSession(ssh_session session)
 {
-    ssh_event_remove_session(event_.get(), session);
+    ssh_event_remove_session(event.get(), session);
 }
 
 int SSHEvent::poll(int timeout)
 {
-    int rc = ssh_event_dopoll(event_.get(), timeout);
+    int rc = ssh_event_dopoll(event.get(), timeout);
     if (rc == SSH_ERROR)
     {
         throw std::runtime_error("Error on polling on ssh event");
@@ -59,15 +59,15 @@ int SSHEvent::poll()
     return poll(-1);
 }
 
-void SSHEvent::add_fd(int fd, int events, ssh_event_callback cb, void * userdata)
+void SSHEvent::addFd(int fd, int events, ssh_event_callback cb, void * userdata)
 {
-    if (ssh_event_add_fd(event_.get(), fd, events, cb, userdata) == SSH_ERROR)
+    if (ssh_event_add_fd(event.get(), fd, events, cb, userdata) == SSH_ERROR)
         throw std::runtime_error("Error on adding custom file descriptor to ssh event");
 }
 
-void SSHEvent::remove_fd(socket_t fd)
+void SSHEvent::removeFd(socket_t fd)
 {
-    ssh_event_remove_fd(event_.get(), fd);
+    ssh_event_remove_fd(event.get(), fd);
 }
 
 void SSHEvent::deleter(ssh_event e)

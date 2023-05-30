@@ -1,4 +1,4 @@
-#include "LocalServerPty.h"
+#include "EmbeddedClient.h"
 
 #include <base/getFQDNOrHostName.h>
 #include <Interpreters/Session.h>
@@ -78,7 +78,7 @@ bool getEnvOptionBool(const NameToNameMap & envVars, const String & key, bool de
 }
 
 
-void LocalServerPty::processError(const String &) const
+void EmbeddedClient::processError(const String &) const
 {
     if (ignore_error)
         return;
@@ -95,7 +95,7 @@ void LocalServerPty::processError(const String &) const
             message = client_exception->message();
         }
 
-        errorStream << fmt::format("Received exception\n{}\n\n", message);
+        error_stream << fmt::format("Received exception\n{}\n\n", message);
     }
     else
     {
@@ -107,7 +107,7 @@ void LocalServerPty::processError(const String &) const
 }
 
 
-void LocalServerPty::cleanup()
+void EmbeddedClient::cleanup()
 {
     try
     {
@@ -120,7 +120,7 @@ void LocalServerPty::cleanup()
 }
 
 
-void LocalServerPty::connect()
+void EmbeddedClient::connect()
 {
     if (!session)
     {
@@ -136,7 +136,7 @@ void LocalServerPty::connect()
 }
 
 
-int LocalServerPty::run(const NameToNameMap & envVars, const String & first_query)
+int EmbeddedClient::run(const NameToNameMap & envVars, const String & first_query)
 {
 try
 {
@@ -145,8 +145,8 @@ try
 
     print_stack_trace = getEnvOptionBool(envVars, "stacktrace", false);
 
-    outputStream << std::fixed << std::setprecision(3);
-    errorStream << std::fixed << std::setprecision(3);
+    output_stream << std::fixed << std::setprecision(3);
+    error_stream << std::fixed << std::setprecision(3);
 
     is_interactive = stdin_is_a_tty;
     static_query = first_query.empty() ? getEnvOption(envVars, "query", "") : first_query;
@@ -169,7 +169,6 @@ try
 
     default_database = getEnvOption(envVars, "database", "");
 
-
     format = getEnvOption(envVars, "output-format", getEnvOption(envVars, "format", is_interactive ? "PrettyCompact" : "TSV"));
     insert_format = "Values";
     insert_format_max_block_size = getEnvOptionUInt64(envVars, "insert_format_max_block_size",
@@ -187,7 +186,7 @@ try
     {
         clearTerminal();
         showClientVersion();
-        errorStream << std::endl;
+        error_stream << std::endl;
     }
 
     connect();
@@ -212,14 +211,14 @@ catch (const DB::Exception & e)
 {
     cleanup();
 
-    errorStream << getExceptionMessage(e, print_stack_trace, true) << std::endl;
+    error_stream << getExceptionMessage(e, print_stack_trace, true) << std::endl;
     return e.code() ? e.code() : -1;
 }
 catch (...)
 {
     cleanup();
 
-    errorStream << getCurrentExceptionMessage(false) << std::endl;
+    error_stream << getCurrentExceptionMessage(false) << std::endl;
     return getCurrentExceptionCode();
 }
 }

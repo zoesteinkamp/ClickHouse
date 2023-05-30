@@ -37,7 +37,7 @@ public:
 private:
     static void deleter(ssh_session session);
 
-    std::unique_ptr<ssh_session_struct, decltype(&deleter)> session_;
+    std::unique_ptr<ssh_session_struct, decltype(&deleter)> session;
 };
 
 }

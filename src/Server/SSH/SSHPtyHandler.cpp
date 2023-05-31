@@ -78,6 +78,7 @@ public:
         channel_cb.channel_pty_window_change_function = ptyResizeAdapter<ssh_session, ssh_channel, int, int, int, int>;
         channel_cb.channel_env_request_function = envRequestAdapter<ssh_session, ssh_channel, const char *, const char*>;
         channel_cb.channel_exec_request_function = execRequestAdapter<ssh_session, ssh_channel, const char *>;
+        channel_cb.channel_subsystem_request_function = subsystemRequestAdapter<ssh_session, ssh_channel, const char *>;
         ssh_callbacks_init(&channel_cb) ssh_set_channel_callbacks(channel.get(), &channel_cb);
     }
 
@@ -146,6 +147,34 @@ private:
     }
 
     GENERATE_ADAPTER_FUNCTION(ChannelCallback, dataFunction, int)
+
+    int subsystemRequest(ssh_session, ssh_channel, const char * subsystem) noexcept
+    {
+        LOG_TRACE(log, "Received subsystem request");
+        if (strcmp(subsystem, "ch-client") != 0)
+        {
+            return SSH_ERROR;
+        }
+        LOG_TRACE(log, "Subsystem is supported");
+        if (!client_runner.has_value() || client_runner->hasStarted() || !client_runner->hasPty())
+        {
+            return SSH_ERROR;
+        }
+
+        try
+        {
+            client_runner->run(env);
+            client_input_output = client_runner->getDescriptorsForServer();
+            return SSH_OK;
+        }
+        catch (...)
+        {
+            tryLogCurrentException(log, "Exception from starting client");
+            return SSH_ERROR;
+        }
+    }
+
+    GENERATE_ADAPTER_FUNCTION(ChannelCallback, subsystemRequest, int)
 
     int shellRequest(ssh_session, ssh_channel) noexcept
     {

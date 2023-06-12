@@ -37,7 +37,7 @@ private:
 
 public:
     explicit SSHPtyHandlerFactory(
-        IServer & server_, int serverSockFd, const Poco::Util::AbstractConfiguration & config)
+        IServer & server_, const Poco::Util::AbstractConfiguration & config)
         : server(server_), log(&Poco::Logger::get("SSHHandlerFactory"))
     {
         LOG_INFO(log, "Initializing sshbind");
@@ -82,8 +82,6 @@ public:
             bind.setHostKey(ecdsa_key);
         if (!ed25519_key.empty())
             bind.setHostKey(ed25519_key);
-        bind.setFd(serverSockFd);
-        bind.listen();
     }
 
     Poco::Net::TCPServerConnection * createConnection(const Poco::Net::StreamSocket & socket, TCPServer &) override
@@ -91,6 +89,7 @@ public:
         LOG_TRACE(log, "TCP Request. Address: {}", socket.peerAddress().toString());
         ssh::libsshLogger::initialize();
         ssh::SSHSession session;
+        session.disableSocketOwning();
         session.disableDefaultConfig();
         if (read_write_timeout_seconds.has_value() || read_write_timeout_micro_seconds.has_value())
         {

@@ -53,6 +53,16 @@ void SSHSession::disableDefaultConfig()
     }
 }
 
+void SSHSession::disableSocketOwning()
+{
+    bool owns_socket = false;
+    int rc = ssh_options_set(session.get(), SSH_OPTIONS_OWNS_SOCKET, &owns_socket);
+    if (rc != SSH_OK)
+    {
+        throw std::runtime_error(fmt::format("Failed disabling socket owning for ssh session due to {}", getError()));
+    }
+}
+
 void SSHSession::setPeerHost(const String & host)
 {
     int rc = ssh_options_set(session.get(), SSH_OPTIONS_HOST, host.c_str());

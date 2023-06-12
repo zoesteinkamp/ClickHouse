@@ -2251,7 +2251,7 @@ void Server::createServers(
                     port_name,
                     "SSH pty: " + address.toString(),
                     std::make_unique<TCPServer>(
-                        new SSHPtyHandlerFactory(*this, socket.sockfd(), config),
+                        new SSHPtyHandlerFactory(*this, config),
                         server_pool,
                         socket,
                         new Poco::Net::TCPServerParams));

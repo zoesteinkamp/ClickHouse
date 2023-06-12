@@ -29,6 +29,7 @@ public:
     void setPeerHost(const String & host);
     void setFd(int fd);
     void setTimeout(int timeout, int timeout_usec);
+    void disableSocketOwning();
     void handleKeyExchange();
     void disconnect();
     String getError();

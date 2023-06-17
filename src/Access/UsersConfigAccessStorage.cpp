@@ -229,9 +229,10 @@ namespace
                     {
                         keys.emplace_back(ssh::SSHPublicKey::createFromBase64(base64_key, type));
                     }
-                    catch (const std::invalid_argument&)
+                    catch (DB::Exception & e)
                     {
-                        throw Exception(ErrorCodes::BAD_ARGUMENTS, "Bad ssh key in entry: {}", entry);
+                        e.addMessage(fmt::format("Error while processing {} entry", entry));
+                        throw;
                     }
                 }
                 else

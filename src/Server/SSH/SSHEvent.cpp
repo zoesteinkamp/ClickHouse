@@ -1,6 +1,17 @@
 #include "SSHEvent.h"
 #include <stdexcept>
+#include <Common/Exception.h>
 #include <Common/SSH/clibssh.h>
+
+namespace DB
+{
+
+namespace ErrorCodes
+{
+    extern const int SSH_EXCEPTION;
+}
+
+}
 
 namespace ssh
 {
@@ -9,7 +20,7 @@ SSHEvent::SSHEvent() : event(ssh_event_new(), &deleter)
 {
     if (!event)
     {
-        throw std::runtime_error("Failed to create ssh_event");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to create ssh_event");
     }
 }
 
@@ -36,7 +47,7 @@ ssh_event SSHEvent::get() const
 void SSHEvent::addSession(ssh_session session)
 {
     if (ssh_event_add_session(event.get(), session) == SSH_ERROR)
-        throw std::runtime_error("Error adding session to ssh event");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Error adding session to ssh event");
 }
 
 void SSHEvent::removeSession(ssh_session session)
@@ -49,7 +60,7 @@ int SSHEvent::poll(int timeout)
     int rc = ssh_event_dopoll(event.get(), timeout);
     if (rc == SSH_ERROR)
     {
-        throw std::runtime_error("Error on polling on ssh event");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Error on polling on ssh event");
     }
     return rc;
 }
@@ -62,7 +73,7 @@ int SSHEvent::poll()
 void SSHEvent::addFd(int fd, int events, ssh_event_callback cb, void * userdata)
 {
     if (ssh_event_add_fd(event.get(), fd, events, cb, userdata) == SSH_ERROR)
-        throw std::runtime_error("Error on adding custom file descriptor to ssh event");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Error on adding custom file descriptor to ssh event");
 }
 
 void SSHEvent::removeFd(socket_t fd)

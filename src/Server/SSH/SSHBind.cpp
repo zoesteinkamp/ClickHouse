@@ -1,7 +1,19 @@
 #include "SSHBind.h"
 #include <stdexcept>
 #include <fmt/format.h>
+#include <Common/Exception.h>
 #include <Common/SSH/clibssh.h>
+
+namespace DB
+{
+
+namespace ErrorCodes
+{
+    extern const int SSH_EXCEPTION;
+}
+
+}
+
 
 namespace ssh
 {
@@ -10,7 +22,7 @@ SSHBind::SSHBind() : bind_(ssh_bind_new(), &deleter)
 {
     if (!bind_)
     {
-        throw std::runtime_error("Failed to create ssh_bind");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to create ssh_bind");
     }
 }
 
@@ -37,7 +49,7 @@ ssh_bind SSHBind::get() const
 void SSHBind::setHostKey(const std::string & key_path)
 {
     if (ssh_bind_options_set(bind_.get(), SSH_BIND_OPTIONS_HOSTKEY, key_path.c_str()) != SSH_OK)
-        throw std::invalid_argument(fmt::format("Failed setting host key in sshbind due to {}", getError()));
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed setting host key in sshbind due to {}", getError());
 }
 
 
@@ -50,7 +62,7 @@ void SSHBind::disableDefaultConfig()
 {
     bool enable = false;
     if (ssh_bind_options_set(bind_.get(), SSH_BIND_OPTIONS_PROCESS_CONFIG, &enable) != SSH_OK)
-        throw std::runtime_error(fmt::format("Failed disabling default config in sshbind due to {}", getError()));
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed disabling default config in sshbind due to {}", getError());
 }
 
 void SSHBind::setFd(int fd)
@@ -61,13 +73,13 @@ void SSHBind::setFd(int fd)
 void SSHBind::listen()
 {
     if (ssh_bind_listen(bind_.get()) != SSH_OK)
-        throw std::runtime_error(fmt::format("Failed listening in sshbind due to {}", getError()));
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed listening in sshbind due to {}", getError());
 }
 
 void SSHBind::acceptFd(ssh_session session, int fd)
 {
     if (ssh_bind_accept_fd(bind_.get(), session, fd) != SSH_OK)
-        throw std::runtime_error(fmt::format("Failed accepting fd in sshbind due to {}", getError()));
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed accepting fd in sshbind due to {}", getError());
 }
 
 void SSHBind::deleter(ssh_bind bind)

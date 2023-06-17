@@ -1,6 +1,17 @@
 #include "SSHChannel.h"
 #include <stdexcept>
+#include <Common/Exception.h>
 #include <Common/SSH/clibssh.h>
+
+namespace DB
+{
+
+namespace ErrorCodes
+{
+    extern const int SSH_EXCEPTION;
+}
+
+}
 
 namespace ssh
 {
@@ -9,7 +20,7 @@ SSHChannel::SSHChannel(ssh_session session) : channel_(ssh_channel_new(session),
 {
     if (!channel_)
     {
-        throw std::runtime_error("Failed to create ssh_channel");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to create ssh_channel");
     }
 }
 

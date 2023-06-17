@@ -330,9 +330,9 @@ private:
             channel_callback = std::make_unique<ChannelCallback>(std::move(channel), std::move(db_session));
             return channel_callback->channel.get();
         }
-        catch (const std::runtime_error & err)
+        catch (...)
         {
-            LOG_ERROR(log, "Error while opening channel: {}", err.what());
+            tryLogCurrentException(log, "Error while opening channel:");
             return nullptr;
         }
     }

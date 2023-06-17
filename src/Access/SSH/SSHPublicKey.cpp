@@ -1,6 +1,19 @@
 #include <stdexcept>
 #include <Access/SSH/SSHPublicKey.h>
+#include <Common/Exception.h>
 #include <Common/SSH/clibssh.h>
+
+namespace DB
+{
+
+namespace ErrorCodes
+{
+    extern const int SSH_EXCEPTION;
+    extern const int LOGICAL_ERROR;
+    extern const int BAD_ARGUMENTS;
+}
+
+}
 
 namespace ssh
 {
@@ -9,7 +22,7 @@ SSHPublicKey::SSHPublicKey(ssh_key key_, bool own) : key(key_, own ? &deleter : 
 { // disable deleter if class is constructed without ownership
     if (!key)
     {
-        throw std::logic_error("No ssh_key provided in explicit constructor");
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "No ssh_key provided in explicit constructor");
     }
 }
 
@@ -19,7 +32,7 @@ SSHPublicKey::SSHPublicKey(const SSHPublicKey & other) : key(ssh_key_dup(other.g
 {
     if (!key)
     {
-        throw std::runtime_error("Failed to duplicate ssh_key");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to duplicate ssh_key");
     }
 }
 
@@ -30,7 +43,7 @@ SSHPublicKey & SSHPublicKey::operator=(const SSHPublicKey & other)
         ssh_key new_key = ssh_key_dup(other.get());
         if (!new_key)
         {
-            throw std::runtime_error("Failed to duplicate ssh_key");
+            throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to duplicate ssh_key");
         }
         key.reset(new_key);
     }
@@ -63,7 +76,11 @@ SSHPublicKey SSHPublicKey::createFromBase64(const String & base64, const String 
     int rc = ssh_pki_import_pubkey_base64(base64.c_str(), ssh_key_type_from_name(key_type.c_str()), &key);
     if (rc != SSH_OK)
     {
-        throw std::invalid_argument("Bad ssh public key provided");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed importing public key from base64 format.\n\
+                Key: {}\n\
+                Type: {}",
+                base64, key_type
+        );
     }
     return SSHPublicKey(key);
 }
@@ -76,9 +93,12 @@ SSHPublicKey SSHPublicKey::createFromFile(const std::string & filename)
     {
         if (rc == SSH_EOF)
         {
-            throw std::invalid_argument("Can't import ssh public key from file as it doesn't exist or permission denied");
+            throw DB::Exception(
+                    DB::ErrorCodes::BAD_ARGUMENTS,
+                    "Can't import ssh public key from file {} as it doesn't exist or permission denied", filename
+                    );
         }
-        throw std::runtime_error("Can't import ssh public key from file");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Can't import ssh public key from file {}", filename);
     }
     return SSHPublicKey(key);
 }
@@ -105,7 +125,7 @@ String SSHPublicKey::getBase64Representation() const
 
     if (rc != SSH_OK)
     {
-        throw std::runtime_error("Failed to export public key to base64");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to export public key to base64");
     }
 
     // Create a String from cstring, which makes a copy of the first one and requires freeing memory after it

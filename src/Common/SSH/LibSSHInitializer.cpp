@@ -1,5 +1,15 @@
 #include "LibSSHInitializer.h"
-#include <stdexcept>
+#include <Common/Exception.h>
+
+namespace DB
+{
+
+namespace ErrorCodes
+{
+    extern const int SSH_EXCEPTION;
+}
+
+}
 
 namespace ssh
 {
@@ -9,7 +19,7 @@ LibSSHInitializer::LibSSHInitializer()
     int rc = ssh_init();
     if (rc != SSH_OK)
     {
-        throw std::runtime_error("Failed to initialize libssh");
+        throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to initialize libssh");
     }
 }
 

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_set>
 #include <base/types.h>
 
 struct ssh_key_struct;
@@ -14,7 +15,19 @@ namespace ssh
 
 class SSHPublicKey
 {
+private:
+    class KeyHasher
+    {
+    public:
+        std::size_t operator()(const SSHPublicKey & input_key) const;
+
+    private:
+        std::hash<std::string> string_hasher;
+    };
+
 public:
+    using KeySet = std::unordered_set<SSHPublicKey, KeyHasher>;
+
     SSHPublicKey() = delete;
     ~SSHPublicKey();
 
@@ -31,6 +44,8 @@ public:
     bool isEqual(const SSHPublicKey & other) const;
 
     String getBase64Representation() const;
+
+    String getType() const;
 
     static SSHPublicKey createFromBase64(const String & base64, const String & key_type);
 

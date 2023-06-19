@@ -236,7 +236,7 @@ bool Authentication::areCredentialsValid(const Credentials & credentials, const 
             {
                 // For SSHKeyPlainCredentials just check, that user is associated with provided public key
                 const auto & keys = auth_data.getSshKeys();
-                return std::find(keys.begin(), keys.end(), ssh_key_credentials->getKey()) != keys.end();
+                return keys.contains(ssh_key_credentials->getKey());
             }
 
             case AuthenticationType::MAX:

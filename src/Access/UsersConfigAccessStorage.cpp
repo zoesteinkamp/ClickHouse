@@ -215,7 +215,7 @@ namespace
             // User can specify multiple public keys, that can be used for authentication
             Poco::Util::AbstractConfiguration::Keys entries;
             config.keys(ssh_keys_config, entries);
-            std::vector<ssh::SSHPublicKey> keys;
+            ssh::SSHPublicKey::KeySet keys;
             for (const String & entry : entries)
             {
                 const auto conf_pref = ssh_keys_config + "." + entry + ".";
@@ -227,7 +227,7 @@ namespace
 
                     try
                     {
-                        keys.emplace_back(ssh::SSHPublicKey::createFromBase64(base64_key, type));
+                        keys.emplace(ssh::SSHPublicKey::createFromBase64(base64_key, type));
                     }
                     catch (DB::Exception & e)
                     {

@@ -62,8 +62,8 @@ public:
     void setSSLCertificateCommonNames(boost::container::flat_set<String> common_names_);
 
 #if USE_SSL
-    const std::vector<ssh::SSHPublicKey> & getSshKeys() const { return ssh_keys; }
-    void setSshKeys(std::vector<ssh::SSHPublicKey> && ssh_keys_) { ssh_keys = std::move(ssh_keys_); }
+    const ssh::SSHPublicKey::KeySet & getSshKeys() const { return ssh_keys; }
+    void setSshKeys(ssh::SSHPublicKey::KeySet && ssh_keys_) { ssh_keys = std::move(ssh_keys_); }
 #endif
 
     friend bool operator ==(const AuthenticationData & lhs, const AuthenticationData & rhs);
@@ -93,7 +93,7 @@ private:
     boost::container::flat_set<String> ssl_certificate_common_names;
     String salt;
 #if USE_SSL
-    std::vector<ssh::SSHPublicKey> ssh_keys;
+    ssh::SSHPublicKey::KeySet ssh_keys;
 #endif
 };
 

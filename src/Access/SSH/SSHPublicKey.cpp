@@ -133,6 +133,23 @@ String SSHPublicKey::getBase64Representation() const
     return String(buf_ptr.get());
 }
 
+String SSHPublicKey::getType() const
+{
+    const char * type_c = ssh_key_type_to_char(ssh_key_type(key.get()));
+    if (type_c == nullptr)
+    {
+        throw DB::Exception(DB::ErrorCodes::LOGICAL_ERROR, "Key type is unknown or no key contained");
+    }
+    return String(type_c);
+}
+
+std::size_t SSHPublicKey::KeyHasher::operator()(const SSHPublicKey & input_key) const
+{
+    String combined_string(input_key.getType());
+    combined_string += input_key.getBase64Representation();
+    return string_hasher(combined_string);
+}
+
 void SSHPublicKey::deleter(ssh_key key)
 {
     ssh_key_free(key);

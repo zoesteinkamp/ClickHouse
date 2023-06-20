@@ -40,7 +40,7 @@ SSHSession & SSHSession::operator=(SSHSession && other) noexcept
     return *this;
 }
 
-ssh_session SSHSession::get() const
+SSHSession::SessionPtr SSHSession::getCSessionPtr() const
 {
     return session.get();
 }
@@ -130,7 +130,7 @@ bool SSHSession::hasFinished()
     return ssh_get_status(session.get()) & (SSH_CLOSED | SSH_CLOSED_ERROR);
 }
 
-void SSHSession::deleter(ssh_session session)
+void SSHSession::deleter(SessionPtr session)
 {
     ssh_free(session);
 }

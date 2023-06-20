@@ -39,20 +39,15 @@ SSHEvent & SSHEvent::operator=(SSHEvent && other) noexcept
     return *this;
 }
 
-ssh_event SSHEvent::get() const
+void SSHEvent::addSession(SSHSession & session)
 {
-    return event.get();
-}
-
-void SSHEvent::addSession(ssh_session session)
-{
-    if (ssh_event_add_session(event.get(), session) == SSH_ERROR)
+    if (ssh_event_add_session(event.get(), session.getCSessionPtr()) == SSH_ERROR)
         throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Error adding session to ssh event");
 }
 
-void SSHEvent::removeSession(ssh_session session)
+void SSHEvent::removeSession(SSHSession & session)
 {
-    ssh_event_remove_session(event.get(), session);
+    ssh_event_remove_session(event.get(), session.getCSessionPtr());
 }
 
 int SSHEvent::poll(int timeout)
@@ -70,7 +65,7 @@ int SSHEvent::poll()
     return poll(-1);
 }
 
-void SSHEvent::addFd(int fd, int events, ssh_event_callback cb, void * userdata)
+void SSHEvent::addFd(int fd, int events, EventCallback cb, void * userdata)
 {
     if (ssh_event_add_fd(event.get(), fd, events, cb, userdata) == SSH_ERROR)
         throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Error on adding custom file descriptor to ssh event");
@@ -81,7 +76,7 @@ void SSHEvent::removeFd(socket_t fd)
     ssh_event_remove_fd(event.get(), fd);
 }
 
-void SSHEvent::deleter(ssh_event e)
+void SSHEvent::deleter(EventPtr e)
 {
     ssh_event_free(e);
 }

@@ -79,7 +79,7 @@ public:
         channel_cb.channel_env_request_function = envRequestAdapter<ssh_session, ssh_channel, const char *, const char*>;
         channel_cb.channel_exec_request_function = execRequestAdapter<ssh_session, ssh_channel, const char *>;
         channel_cb.channel_subsystem_request_function = subsystemRequestAdapter<ssh_session, ssh_channel, const char *>;
-        ssh_callbacks_init(&channel_cb) ssh_set_channel_callbacks(channel.get(), &channel_cb);
+        ssh_callbacks_init(&channel_cb) ssh_set_channel_callbacks(channel.getCChannelPtr(), &channel_cb);
     }
 
     bool hasClientFinished() { return client_runner.has_value() && client_runner->hasFinished(); }
@@ -303,9 +303,9 @@ public:
         server_cb.userdata = this;
         server_cb.auth_password_function = authPasswordAdapter<ssh_session, const char*, const char*>;
         server_cb.auth_pubkey_function = authPublickeyAdapter<ssh_session, const char *, ssh_key, char>;
-        ssh_set_auth_methods(session.get(), SSH_AUTH_METHOD_PASSWORD | SSH_AUTH_METHOD_PUBLICKEY);
+        ssh_set_auth_methods(session.getCSessionPtr(), SSH_AUTH_METHOD_PASSWORD | SSH_AUTH_METHOD_PUBLICKEY);
         server_cb.channel_open_request_session_function = channelOpenAdapter<ssh_session>;
-        ssh_callbacks_init(&server_cb) ssh_set_server_callbacks(session.get(), &server_cb);
+        ssh_callbacks_init(&server_cb) ssh_set_server_callbacks(session.getCSessionPtr(), &server_cb);
     }
 
     size_t auth_attempts = 0;
@@ -328,7 +328,7 @@ private:
         {
             auto channel = ssh::SSHChannel(session);
             channel_callback = std::make_unique<ChannelCallback>(std::move(channel), std::move(db_session));
-            return channel_callback->channel.get();
+            return channel_callback->channel.getCChannelPtr();
         }
         catch (...)
         {
@@ -434,7 +434,7 @@ void SSHPtyHandler::run()
     ssh::SSHEvent event;
     SessionCallback sdata(session, server, socket().peerAddress());
     session.handleKeyExchange();
-    event.addSession(session.get());
+    event.addSession(session);
     int max_iterations = auth_timeout_seconds * 1000 / event_poll_interval_milliseconds;
     int n = 0;
     while (!sdata.authenticated || !sdata.channel_callback)
@@ -473,11 +473,11 @@ void SSHPtyHandler::run()
         /* If stdout valid, add stdout to be monitored by the poll event. */
         if (sdata.channel_callback->client_input_output.out != -1)
         {
-            event.addFd(sdata.channel_callback->client_input_output.out, POLLIN, process_stdout, sdata.channel_callback->channel.get());
+            event.addFd(sdata.channel_callback->client_input_output.out, POLLIN, process_stdout, sdata.channel_callback->channel.getCChannelPtr());
         }
         if (sdata.channel_callback->client_input_output.err != -1)
         {
-            event.addFd(sdata.channel_callback->client_input_output.err, POLLIN, process_stderr, sdata.channel_callback->channel.get());
+            event.addFd(sdata.channel_callback->client_input_output.err, POLLIN, process_stderr, sdata.channel_callback->channel.getCChannelPtr());
         }
     } while (sdata.channel_callback->channel.isOpen() && !sdata.channel_callback->hasClientFinished() && !server.isCancelled());
 

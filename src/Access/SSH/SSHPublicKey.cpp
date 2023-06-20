@@ -18,7 +18,7 @@ namespace ErrorCodes
 namespace ssh
 {
 
-SSHPublicKey::SSHPublicKey(ssh_key key_, bool own) : key(key_, own ? &deleter : &disabledDeleter)
+SSHPublicKey::SSHPublicKey(KeyPtr key_, bool own) : key(key_, own ? &deleter : &disabledDeleter)
 { // disable deleter if class is constructed without ownership
     if (!key)
     {
@@ -28,7 +28,7 @@ SSHPublicKey::SSHPublicKey(ssh_key key_, bool own) : key(key_, own ? &deleter : 
 
 SSHPublicKey::~SSHPublicKey() = default;
 
-SSHPublicKey::SSHPublicKey(const SSHPublicKey & other) : key(ssh_key_dup(other.get()), &deleter)
+SSHPublicKey::SSHPublicKey(const SSHPublicKey & other) : key(ssh_key_dup(other.key.get()), &deleter)
 {
     if (!key)
     {
@@ -40,7 +40,7 @@ SSHPublicKey & SSHPublicKey::operator=(const SSHPublicKey & other)
 {
     if (this != &other)
     {
-        ssh_key new_key = ssh_key_dup(other.get());
+        KeyPtr new_key = ssh_key_dup(other.key.get());
         if (!new_key)
         {
             throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to duplicate ssh_key");
@@ -59,20 +59,15 @@ bool SSHPublicKey::operator==(const SSHPublicKey & other) const
     return isEqual(other);
 }
 
-ssh_key SSHPublicKey::get() const
-{
-    return key.get();
-}
-
 bool SSHPublicKey::isEqual(const SSHPublicKey & other) const
 {
-    int rc = ssh_key_cmp(key.get(), other.get(), SSH_KEY_CMP_PUBLIC);
+    int rc = ssh_key_cmp(key.get(), other.key.get(), SSH_KEY_CMP_PUBLIC);
     return rc == 0;
 }
 
 SSHPublicKey SSHPublicKey::createFromBase64(const String & base64, const String & key_type)
 {
-    ssh_key key;
+    KeyPtr key;
     int rc = ssh_pki_import_pubkey_base64(base64.c_str(), ssh_key_type_from_name(key_type.c_str()), &key);
     if (rc != SSH_OK)
     {
@@ -87,7 +82,7 @@ SSHPublicKey SSHPublicKey::createFromBase64(const String & base64, const String 
 
 SSHPublicKey SSHPublicKey::createFromFile(const std::string & filename)
 {
-    ssh_key key;
+    KeyPtr key;
     int rc = ssh_pki_import_pubkey_file(filename.c_str(), &key);
     if (rc != SSH_OK)
     {
@@ -103,7 +98,7 @@ SSHPublicKey SSHPublicKey::createFromFile(const std::string & filename)
     return SSHPublicKey(key);
 }
 
-SSHPublicKey SSHPublicKey::createNonOwning(ssh_key key)
+SSHPublicKey SSHPublicKey::createNonOwning(KeyPtr key)
 {
     return SSHPublicKey(key, false);
 }
@@ -150,7 +145,7 @@ std::size_t SSHPublicKey::KeyHasher::operator()(const SSHPublicKey & input_key) 
     return string_hasher(combined_string);
 }
 
-void SSHPublicKey::deleter(ssh_key key)
+void SSHPublicKey::deleter(KeyPtr key)
 {
     ssh_key_free(key);
 }

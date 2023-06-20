@@ -7,7 +7,6 @@
 #include <base/types.h>
 
 struct ssh_key_struct;
-using ssh_key = ssh_key_struct *;
 
 namespace ssh
 {
@@ -26,6 +25,7 @@ private:
     };
 
 public:
+    using KeyPtr = ssh_key_struct *;
     using KeySet = std::unordered_set<SSHPublicKey, KeyHasher>;
 
     SSHPublicKey() = delete;
@@ -39,8 +39,6 @@ public:
 
     bool operator==(const SSHPublicKey &) const;
 
-    ssh_key get() const;
-
     bool isEqual(const SSHPublicKey & other) const;
 
     String getBase64Representation() const;
@@ -53,15 +51,15 @@ public:
 
     // Creates SSHPublicKey, but without owning the memory of ssh_key.
     // A user must manage it by himself. (This is implemented for compatibility with libssh callbacks)
-    static SSHPublicKey createNonOwning(ssh_key key);
+    static SSHPublicKey createNonOwning(KeyPtr key);
 
 private:
-    explicit SSHPublicKey(ssh_key key, bool own = true);
+    explicit SSHPublicKey(KeyPtr key, bool own = true);
 
-    static void deleter(ssh_key key);
+    static void deleter(KeyPtr key);
 
     // We may want to not own ssh_key memory, so then we pass this deleter to unique_ptr
-    static void disabledDeleter(ssh_key) { }
+    static void disabledDeleter(KeyPtr) { }
 
     std::unique_ptr<ssh_key_struct, decltype(&deleter)> key;
 };

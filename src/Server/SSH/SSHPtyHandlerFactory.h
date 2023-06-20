@@ -95,7 +95,7 @@ public:
         {
             session.setTimeout(read_write_timeout_seconds.value_or(0), read_write_timeout_micro_seconds.value_or(0));
         }
-        bind.acceptFd(session.get(), socket.sockfd());
+        bind.acceptFd(session, socket.sockfd());
 
         return new SSHPtyHandler(
             server,

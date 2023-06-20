@@ -1,11 +1,9 @@
 #pragma once
 
 #include <memory>
+#include "Server/SSH/SSHSession.h"
 
 struct ssh_channel_struct;
-struct ssh_session_struct;
-using ssh_channel = ssh_channel_struct *;
-using ssh_session = ssh_session_struct *;
 
 namespace ssh
 {
@@ -13,7 +11,9 @@ namespace ssh
 class SSHChannel
 {
 public:
-    explicit SSHChannel(ssh_session session);
+    using ChannelPtr = ssh_channel_struct *;
+
+    explicit SSHChannel(SSHSession::SessionPtr session);
     ~SSHChannel();
 
     SSHChannel(const SSHChannel &) = delete;
@@ -22,7 +22,7 @@ public:
     SSHChannel(SSHChannel &&) noexcept;
     SSHChannel & operator=(SSHChannel &&) noexcept;
 
-    ssh_channel get() const;
+    ChannelPtr getCChannelPtr() const;
 
     int read(void * dest, uint32_t count, int isStderr);
     int readTimeout(void * dest, uint32_t count, int isStderr, int timeout);
@@ -32,9 +32,9 @@ public:
     bool isOpen();
 
 private:
-    static void deleter(ssh_channel ch);
+    static void deleter(ChannelPtr ch);
 
-    std::unique_ptr<ssh_channel_struct, decltype(&deleter)> channel_;
+    std::unique_ptr<ssh_channel_struct, decltype(&deleter)> channel;
 };
 
 }

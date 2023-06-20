@@ -4,7 +4,6 @@
 #include "base/types.h"
 
 struct ssh_session_struct;
-using ssh_session = ssh_session_struct *;
 
 namespace ssh
 {
@@ -13,6 +12,8 @@ namespace ssh
 class SSHSession
 {
 public:
+    using SessionPtr = ssh_session_struct *;
+
     SSHSession();
     ~SSHSession();
 
@@ -22,7 +23,7 @@ public:
     SSHSession(SSHSession &&) noexcept;
     SSHSession & operator=(SSHSession &&) noexcept;
 
-    ssh_session get() const;
+    SessionPtr getCSessionPtr() const;
 
     void disableDefaultConfig();
     void connect();
@@ -36,7 +37,7 @@ public:
     bool hasFinished();
 
 private:
-    static void deleter(ssh_session session);
+    static void deleter(SessionPtr session);
 
     std::unique_ptr<ssh_session_struct, decltype(&deleter)> session;
 };

@@ -1,12 +1,9 @@
 #pragma once
 
 #include <memory>
+#include "Server/SSH/SSHSession.h"
 
 struct ssh_event_struct;
-struct ssh_session_struct;
-using ssh_event = ssh_event_struct *;
-using ssh_session = ssh_session_struct *;
-using ssh_event_callback = int (*)(int fd, int revents, void * userdata);
 
 namespace ssh
 {
@@ -14,6 +11,9 @@ namespace ssh
 class SSHEvent
 {
 public:
+    using EventPtr = ssh_event_struct *;
+    using EventCallback = int (*)(int fd, int revents, void * userdata);
+
     SSHEvent();
     ~SSHEvent();
 
@@ -23,16 +23,15 @@ public:
     SSHEvent(SSHEvent &&) noexcept;
     SSHEvent & operator=(SSHEvent &&) noexcept;
 
-    ssh_event get() const;
-    void addSession(ssh_session session);
-    void removeSession(ssh_session session);
-    void addFd(int fd, int events, ssh_event_callback cb, void * userdata);
+    void addSession(SSHSession & session);
+    void removeSession(SSHSession & session);
+    void addFd(int fd, int events, EventCallback cb, void * userdata);
     void removeFd(int fd);
     int poll(int timeout);
     int poll();
 
 private:
-    static void deleter(ssh_event e);
+    static void deleter(EventPtr e);
 
     std::unique_ptr<ssh_event_struct, decltype(&deleter)> event;
 };

@@ -61,7 +61,8 @@ private:
     // We may want to not own ssh_key memory, so then we pass this deleter to unique_ptr
     static void disabledDeleter(KeyPtr) { }
 
-    std::unique_ptr<ssh_key_struct, decltype(&deleter)> key;
+    using UniqueKeyPtr = std::unique_ptr<ssh_key_struct, decltype(&deleter)>;
+    UniqueKeyPtr key;
 };
 
 }

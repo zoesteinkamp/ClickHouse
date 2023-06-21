@@ -45,7 +45,8 @@ SSHPublicKey & SSHPublicKey::operator=(const SSHPublicKey & other)
         {
             throw DB::Exception(DB::ErrorCodes::SSH_EXCEPTION, "Failed to duplicate ssh_key");
         }
-        key.reset(new_key);
+        key = UniqueKeyPtr(new_key, deleter); // We don't have access to the pointer from external code, opposed to non owning key object.
+                                              // So here we always go for default deleter, regardless of other's
     }
     return *this;
 }

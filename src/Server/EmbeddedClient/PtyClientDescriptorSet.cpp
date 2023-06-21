@@ -10,6 +10,17 @@ namespace ErrorCodes
     extern const int SYSTEM_ERROR;
 }
 
+void PtyClientDescriptorSet::FileDescriptorWrapper::close()
+{
+    if (fd != -1)
+    {
+        if (::close(fd) != 0 && errno != EINTR)
+            throwFromErrno("Unexpected error while closing file descriptor", ErrorCodes::SYSTEM_ERROR);
+    }
+    fd = -1;
+}
+
+
 PtyClientDescriptorSet::PtyClientDescriptorSet(const String & term_name_, int width, int height, int width_pixels, int height_pixels)
     : term_name(term_name_)
 {

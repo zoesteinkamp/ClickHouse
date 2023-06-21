@@ -34,7 +34,7 @@ void EmbeddedClientRunner::changeWindowSize(int width, int height, int width_pix
 EmbeddedClientRunner::~EmbeddedClientRunner()
 {
     LOG_INFO(log, "Closing server descriptors and waiting for client to finish");
-    client_descriptors->closeServerDescriptors();
+    client_descriptors->closeServerDescriptors(); // May throw if something bad happens to descriptors, which will call std::terminate
     if (client_thread.joinable())
     {
         client_thread.join();

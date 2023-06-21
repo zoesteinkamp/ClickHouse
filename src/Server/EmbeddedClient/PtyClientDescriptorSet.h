@@ -26,7 +26,7 @@ public:
 
     void changeWindowSize(int width, int height, int width_pixels, int height_pixels) const;
 
-    void closeServerDescriptors() override { pty_master.safeClose(); }
+    void closeServerDescriptors() override { pty_master.close(); }
 
     bool isPty() const override { return true; }
 
@@ -40,21 +40,15 @@ private:
 
         void capture(int fd_)
         {
-            safeClose();
+            close();
             fd = fd_;
         }
 
         int get() const { return fd; }
 
-        void safeClose()
-        {
-            if (fd != -1)
-                if (close(fd) != 0)
-                    abort();
-            fd = -1;
-        }
+        void close();
 
-        ~FileDescriptorWrapper() { safeClose(); }
+        ~FileDescriptorWrapper() { close(); } // may throw, thus std::terminate
 
     private:
         int fd = -1;

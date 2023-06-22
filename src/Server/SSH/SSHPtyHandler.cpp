@@ -319,7 +319,7 @@ public:
 private:
     ssh_channel channelOpen(ssh_session session) noexcept
     {
-        LOG_INFO(log, "Opening a channel");
+        LOG_DEBUG(log, "Opening a channel");
         if (!db_session)
         {
             return nullptr;

@@ -22,8 +22,6 @@ namespace
                 break;
             case SSH_LOG_PROTOCOL:
             case SSH_LOG_PACKET:
-                LOG_DEBUG(logger, "{}", buffer);
-                break;
             case SSH_LOG_FUNCTIONS:
                 LOG_TRACE(logger, "{}", buffer);
                 break;

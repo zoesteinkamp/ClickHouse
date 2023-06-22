@@ -16,7 +16,7 @@ void EmbeddedClientRunner::run(const NameToNameMap & envs, const String & starti
     {
         throw Exception(ErrorCodes::LOGICAL_ERROR, "Client has been already started");
     }
-    LOG_INFO(log, "Starting client");
+    LOG_DEBUG(log, "Starting client");
     client_thread = ThreadFromGlobalPool(&EmbeddedClientRunner::clientRoutine, this, envs, starting_query);
 }
 
@@ -33,13 +33,13 @@ void EmbeddedClientRunner::changeWindowSize(int width, int height, int width_pix
 
 EmbeddedClientRunner::~EmbeddedClientRunner()
 {
-    LOG_INFO(log, "Closing server descriptors and waiting for client to finish");
+    LOG_DEBUG(log, "Closing server descriptors and waiting for client to finish");
     client_descriptors->closeServerDescriptors(); // May throw if something bad happens to descriptors, which will call std::terminate
     if (client_thread.joinable())
     {
         client_thread.join();
     }
-    LOG_INFO(log, "Client has finished");
+    LOG_DEBUG(log, "Client has finished");
 }
 
 void EmbeddedClientRunner::clientRoutine(NameToNameMap envs, String starting_query)

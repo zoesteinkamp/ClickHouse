@@ -63,6 +63,7 @@ namespace
 {
 
 
+// Wrapper around ssh_channel_callbacks. Each callback must not throw any exceptions, as c code is executed
 class ChannelCallback
 {
 public:
@@ -294,6 +295,7 @@ int process_stderr(socket_t fd, int revents, void * userdata)
     return n;
 }
 
+// Wrapper around ssh_server_callbacks. Each callback must not throw any exceptions, as c code is executed
 class SessionCallback
 {
 public:
@@ -440,7 +442,7 @@ void SSHPtyHandler::run()
     while (!sdata.authenticated || !sdata.channel_callback)
     {
         /* If the user has used up all attempts, or if he hasn't been able to
-         * authenticate in 10 seconds (n * 100ms), disconnect. */
+         * authenticate in auth_timeout_seconds, disconnect. */
         if (sdata.auth_attempts >= max_auth_attempts || n >= max_iterations)
         {
             return;
@@ -458,16 +460,16 @@ void SSHPtyHandler::run()
     do
     {
         /* Poll the main event which takes care of the session, the channel and
-         * even our child process's stdout/stderr (once it's started). */
+         * even our client's stdout/stderr (once it's started). */
         event.poll(event_poll_interval_milliseconds);
 
-        /* If child process's stdout/stderr has been registered with the event,
-         * or the child process hasn't started yet, continue. */
+        /* If client's stdout/stderr has been registered with the event,
+         * or the client hasn't started yet, continue. */
         if (fds_set || sdata.channel_callback->client_input_output.out == -1)
         {
             continue;
         }
-        /* Executed only once, once the child process starts. */
+        /* Executed only once, once the client starts. */
         fds_set = true;
 
         /* If stdout valid, add stdout to be monitored by the poll event. */
@@ -494,7 +496,7 @@ void SSHPtyHandler::run()
     sdata.channel_callback->channel.sendEof();
     sdata.channel_callback->channel.close();
 
-    /* Wait up to 5 seconds for the client to terminate the session. */
+    /* Wait up to finish_timeout_seconds seconds for the client to terminate the session. */
     max_iterations = finish_timeout_seconds * 1000 / event_poll_interval_milliseconds;
     for (n = 0; n < max_iterations && !session.hasFinished(); n++)
     {

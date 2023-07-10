@@ -11,6 +11,7 @@
 namespace DB
 {
 
+// Runs embedded client in dedicated thread, passes descriptors, checks its state
 class EmbeddedClientRunner
 {
 public:
@@ -26,6 +27,7 @@ public:
 
     bool hasPty() const { return client_descriptors->isPty(); }
 
+    // Sets new window size for tty. Works only if IClientDescriptorSet is pty
     void changeWindowSize(int width, int height, int width_pixels, int height_pixels);
 
     ~EmbeddedClientRunner();

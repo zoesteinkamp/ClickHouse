@@ -17,6 +17,7 @@
 namespace DB
 {
 
+// Client class which can be run embedded into server
 class EmbeddedClient : public ClientCore
 {
 public:

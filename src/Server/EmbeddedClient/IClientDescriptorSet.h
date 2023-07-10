@@ -6,6 +6,7 @@ namespace DB
 {
 
 
+// Interface, which handles descriptor pairs, that could be attached to embedded client
 class IClientDescriptorSet
 {
 public:

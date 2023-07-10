@@ -8,6 +8,7 @@ struct ssh_event_struct;
 namespace ssh
 {
 
+// Wrapper around ssh_event from libssh
 class SSHEvent
 {
 public:
@@ -23,8 +24,10 @@ public:
     SSHEvent(SSHEvent &&) noexcept;
     SSHEvent & operator=(SSHEvent &&) noexcept;
 
+    // Adds session's socket to event. Now callbacks will be executed for this session on poll
     void addSession(SSHSession & session);
     void removeSession(SSHSession & session);
+    // Add fd to ssh_event and assign callbacks on fd event
     void addFd(int fd, int events, EventCallback cb, void * userdata);
     void removeFd(int fd);
     int poll(int timeout);

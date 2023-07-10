@@ -63,6 +63,7 @@ std::istream& operator>> (std::istream & in, ProgressOption & progress);
 class InternalTextLogs;
 class WriteBufferFromFileDescriptor;
 
+// Core client functionality. Can be used embedded into server and in standalone application.
 class ClientCore
 {
 

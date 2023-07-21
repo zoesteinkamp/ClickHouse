@@ -1,15 +1,3 @@
-if (NOT LIBSSH_GLOBAL_BIND_CONFIG)
-  set(GLOBAL_BIND_CONFIG "/etc/ssh/libssh_server_config")
-else()
-  set(GLOBAL_BIND_CONFIG LIBSSH_GLOBAL_BIND_CONFIG)
-endif()
-
-if (NOT LIBSSH_GLOBAL_CLIENT_CONFIG)
-  set(GLOBAL_CLIENT_CONFIG "/etc/ssh/ssh_config")
-else()
-  set(GLOBAL_CLIENT_CONFIG LIBSSH_GLOBAL_CLIENT_CONFIG)
-endif ()
-
 set(LIB_SOURCE_DIR "${ClickHouse_SOURCE_DIR}/contrib/libssh")
 set(LIB_BINARY_DIR "${ClickHouse_BINARY_DIR}/contrib/libssh")
 # Specify search path for CMake modules to be loaded by include()
@@ -51,21 +39,26 @@ set(WITH_ZLIB OFF)
 set(WITH_SYMBOL_VERSIONING OFF)
 set(WITH_SERVER ON)
 
-# config.h checks
-include(ConfigureChecks.cmake)
-configure_file(${LIB_SOURCE_DIR}/config.h.cmake ${LIB_BINARY_DIR}/config.h)
+include(IncludeSources.cmake)
+if ("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "ppc64le")
+    target_include_directories(_ssh PRIVATE "${ClickHouse_SOURCE_DIR}/contrib/libssh-cmake/linux/ppc64le")
+elseif (OS_LINUX)
+    if (USE_MUSL)
+        target_include_directories(_ssh PRIVATE "${ClickHouse_SOURCE_DIR}/contrib/libssh-cmake/linux/x86-64-musl")
+    else()
+        target_include_directories(_ssh PRIVATE "${ClickHouse_SOURCE_DIR}/contrib/libssh-cmake/linux/x86-64")
+    endif()
+elseif (OS_DARWIN)
+    target_include_directories(_ssh PRIVATE "${ClickHouse_SOURCE_DIR}/contrib/libssh-cmake/darwin")
+elseif (OS_FREEBSD)
+    target_include_directories(_ssh PRIVATE "${ClickHouse_SOURCE_DIR}/contrib/libssh-cmake/freebsd")
+endif()
 configure_file(${LIB_SOURCE_DIR}/include/libssh/libssh_version.h.cmake
                ${LIB_BINARY_DIR}/include/libssh/libssh_version.h
                @ONLY)
 
-include(IncludeSources.cmake)
 
 message(STATUS "********************************************")
-message(STATUS "********** ${PROJECT_NAME} build options : **********")
-
-message(STATUS "Global client config: ${GLOBAL_CLIENT_CONFIG}")
-if (WITH_SERVER)
-message(STATUS "Global bind config: ${GLOBAL_BIND_CONFIG}")
-endif()
+message(STATUS "********** ${PROJECT_NAME} configured: **********")
 message(STATUS "********************************************")
 

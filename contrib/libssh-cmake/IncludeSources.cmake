@@ -100,16 +100,6 @@ set(libssh_SRCS
     ${LIB_SOURCE_DIR}/src/libcrypto.c
     ${LIB_SOURCE_DIR}/src/dh_crypto.c
 )
-if (NOT HAVE_OPENSSL_ED25519)
-    set(libssh_SRCS
-        ${libssh_SRCS}
-        ${LIB_SOURCE_DIR}/src/pki_ed25519.c
-        ${LIB_SOURCE_DIR}/src/external/ed25519.c
-        ${LIB_SOURCE_DIR}/src/external/fe25519.c
-        ${LIB_SOURCE_DIR}/src/external/ge25519.c
-        ${LIB_SOURCE_DIR}/src/external/sc25519.c
-       )
-endif (NOT HAVE_OPENSSL_ED25519)
 if(OPENSSL_VERSION VERSION_LESS "1.1.0")
     set(libssh_SRCS ${libssh_SRCS} ${LIB_SOURCE_DIR}/src/libcrypto-compat.c)
 endif()

@@ -91,7 +91,6 @@ int EmbeddedClient::run(const NameToNameMap & envVars, const String & first_quer
 try
 {
     setThreadName("LocalServerPty");
-    thread_status.emplace();
 
     print_stack_trace = getEnvOption<bool>(envVars, "stacktrace", false);
 

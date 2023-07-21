@@ -188,7 +188,7 @@ protected:
 
     /// Should be one of the first, to be destroyed the last,
     /// since other members can use them.
-    SharedContextHolder shared_context;
+    SharedContextHolder shared_context; // maybe not initialized
     ContextMutablePtr global_context;
 
     String default_database;
@@ -238,7 +238,7 @@ protected:
     MergeTreeSettings cmd_merge_tree_settings;
 
     /// thread status should be destructed before shared context because it relies on process list.
-    std::optional<ThreadStatus> thread_status;
+    std::optional<ThreadStatus> thread_status; // may be not initialized in embedded client
 
     ServerConnectionPtr connection;
     ConnectionParameters connection_parameters;

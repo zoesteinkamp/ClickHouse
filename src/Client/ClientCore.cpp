@@ -395,7 +395,7 @@ void ClientCore::onData(Block & block, ASTPtr parsed_query)
         if (is_interactive)
         {
             progress_indication.clearProgressOutput(*tty_buf);
-            std::cout << "Full result:" << std::endl;
+            output_stream << "Full result:" << std::endl;
             progress_indication.writeProgress(*tty_buf);
         }
     }
@@ -922,7 +922,7 @@ void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr pa
     {
         partial_result_mode = PartialResultMode::NotInit;
         if (is_interactive)
-            std::cout << "Partial result:" << std::endl;
+            output_stream << "Partial result:" << std::endl;
     }
 
     int retries_left = 10;
@@ -2426,7 +2426,7 @@ void ClientCore::runInteractive()
         {
             // If a separate connection loading suggestions failed to open a new session,
             // use the main session to receive them.
-            suggest->load(*connection, connection_parameters.timeouts, config().getInt("suggestion_limit"));
+            suggest->load(*connection, connection_parameters.timeouts, suggestion_limit);
         }
 
         try

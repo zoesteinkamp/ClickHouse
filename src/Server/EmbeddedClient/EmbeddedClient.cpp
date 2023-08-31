@@ -92,6 +92,8 @@ try
 {
     setThreadName("LocalServerPty");
 
+    query_processing_stage = QueryProcessingStage::Enum::Complete;
+
     print_stack_trace = getEnvOption<bool>(envVars, "stacktrace", false);
 
     output_stream << std::fixed << std::setprecision(3);

@@ -19,12 +19,12 @@ uint16_t getTerminalWidth(int in_fd, int err_fd)
     if (isatty(in_fd))
     {
         if (ioctl(in_fd, TIOCGWINSZ, &terminal_size))
-            DB::throwFromErrno("Cannot obtain terminal window size (ioctl TIOCGWINSZ)", DB::ErrorCodes::SYSTEM_ERROR);
+            throw DB::ErrnoException(DB::ErrorCodes::SYSTEM_ERROR, "Cannot obtain terminal window size (ioctl TIOCGWINSZ)");
     }
     else if (isatty(err_fd))
     {
         if (ioctl(err_fd, TIOCGWINSZ, &terminal_size))
-            DB::throwFromErrno("Cannot obtain terminal window size (ioctl TIOCGWINSZ)", DB::ErrorCodes::SYSTEM_ERROR);
+            throw DB::ErrnoException(DB::ErrorCodes::SYSTEM_ERROR, "Cannot obtain terminal window size (ioctl TIOCGWINSZ)");
     }
     /// Default - 0.
     return terminal_size.ws_col;

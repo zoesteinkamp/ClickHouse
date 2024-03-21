@@ -1,9 +1,12 @@
 #pragma once
 
 #include <Access/Common/AuthenticationType.h>
-#include <Parsers/Access/ASTAuthenticationData.h>
+#include <Access/Common/HTTPAuthenticationScheme.h>
 #include <Interpreters/Context_fwd.h>
+#include <Parsers/Access/ASTAuthenticationData.h>
+#include <Common/SSH/Wrappers.h>
 
+#include <vector>
 #include <base/types.h>
 #include <boost/container/flat_set.hpp>
 #include "config.h"
@@ -61,10 +64,14 @@ public:
     const boost::container::flat_set<String> & getSSLCertificateCommonNames() const { return ssl_certificate_common_names; }
     void setSSLCertificateCommonNames(boost::container::flat_set<String> common_names_);
 
-#if USE_SSL
-    const ssh::SSHPublicKey::KeySet & getSshKeys() const { return ssh_keys; }
-    void setSshKeys(ssh::SSHPublicKey::KeySet && ssh_keys_) { ssh_keys = std::move(ssh_keys_); }
-#endif
+    const std::vector<ssh::SSHKey> & getSSHKeys() const { return ssh_keys; }
+    void setSSHKeys(std::vector<ssh::SSHKey> && ssh_keys_) { ssh_keys = std::forward<std::vector<ssh::SSHKey>>(ssh_keys_); }
+
+    HTTPAuthenticationScheme getHTTPAuthenticationScheme() const { return http_auth_scheme; }
+    void setHTTPAuthenticationScheme(HTTPAuthenticationScheme scheme) { http_auth_scheme = scheme; }
+
+    const String & getHTTPAuthenticationServerName() const { return http_auth_server_name; }
+    void setHTTPAuthenticationServerName(const String & name) { http_auth_server_name = name; }
 
     friend bool operator ==(const AuthenticationData & lhs, const AuthenticationData & rhs);
     friend bool operator !=(const AuthenticationData & lhs, const AuthenticationData & rhs) { return !(lhs == rhs); }
@@ -92,9 +99,10 @@ private:
     String kerberos_realm;
     boost::container::flat_set<String> ssl_certificate_common_names;
     String salt;
-#if USE_SSL
-    ssh::SSHPublicKey::KeySet ssh_keys;
-#endif
+    std::vector<ssh::SSHKey> ssh_keys;
+    /// HTTP authentication properties
+    String http_auth_server_name;
+    HTTPAuthenticationScheme http_auth_scheme = HTTPAuthenticationScheme::BASIC;
 };
 
 }

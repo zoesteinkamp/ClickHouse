@@ -3,6 +3,7 @@
 #include <string>
 #include <Core/Protocol.h>
 #include <IO/ConnectionTimeouts.h>
+#include <Common/SSH/Wrappers.h>
 
 namespace Poco::Util
 {
@@ -19,18 +20,19 @@ struct ConnectionParameters
     std::string user;
     std::string password;
     std::string quota_key;
+    ssh::SSHKey ssh_private_key;
     Protocol::Secure security = Protocol::Secure::Disable;
     Protocol::Compression compression = Protocol::Compression::Enable;
     ConnectionTimeouts timeouts;
 
     ConnectionParameters() = default;
     // We don't take database from config, as it can be changed after query execution
-    ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database);
+    ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host);
     ConnectionParameters(
         const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host, std::optional<UInt16> port
     );
 
-    static UInt16 getPortFromConfig(const Poco::Util::AbstractConfiguration & config);
+    static UInt16 getPortFromConfig(const Poco::Util::AbstractConfiguration & config, std::string connection_host);
 
     /// Ask to enter the user's password if password option contains this value.
     /// "\n" is used because there is hardly a chance that a user would use '\n' as password.

@@ -8,13 +8,13 @@
 #include <base/argsToConfig.h>
 #include <base/safeExit.h>
 #include <Core/Block.h>
+#include <Core/BaseSettingsProgramOptions.h>
 #include <Core/Protocol.h>
 #include <Common/DateLUT.h>
 #include <Common/MemoryTracker.h>
 #include <Common/scope_guard_safe.h>
 #include <Common/Exception.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
-#include <Common/tests/gtest_global_context.h>
 #include <Common/typeid_cast.h>
 #include <Common/UTF8Helpers.h>
 #include <Common/TerminalSize.h>
@@ -46,6 +46,7 @@
 #include <Parsers/ASTFunction.h>
 #include <Parsers/Kusto/ParserKQLStatement.h>
 #include <Parsers/PRQL/ParserPRQLQuery.h>
+#include <Parsers/Kusto/parseKQLQuery.h>
 
 #include <Processors/Formats/Impl/NullFormat.h>
 #include <Processors/Formats/IInputFormat.h>
@@ -70,11 +71,12 @@
 #include <boost/algorithm/string/case_conv.hpp>
 #include <iostream>
 #include <filesystem>
+#include <limits>
 #include <map>
 #include <memory>
 #include <unordered_map>
 
-#include "config_version.h"
+#include <Common/config_version.h>
 #include "config.h"
 
 namespace fs = std::filesystem;
@@ -101,6 +103,8 @@ namespace ErrorCodes
     extern const int CANNOT_OPEN_FILE;
     extern const int FILE_ALREADY_EXISTS;
     extern const int USER_SESSION_LIMIT_EXCEEDED;
+    extern const int NOT_IMPLEMENTED;
+    extern const int CANNOT_READ_FROM_FILE_DESCRIPTOR;
 }
 
 ProgressOption toProgressOption(std::string progress)
@@ -217,7 +221,7 @@ static void incrementProfileEventsBlock(Block & dst, const Block & src)
 
             dst_array_current_time[dst_row] = src_array_current_time[src_row];
 
-            switch (dst_array_type[dst_row])
+            switch (static_cast<ProfileEvents::Type>(dst_array_type[dst_row]))
             {
                 case ProfileEvents::Type::INCREMENT:
                     dst_array_value[dst_row] += src_array_value[src_row];
@@ -270,8 +274,35 @@ ClientCore::ClientCore(
     terminal_width = getTerminalWidth(in_fd, err_fd);
 }
 
-
 ClientCore::~ClientCore() = default;
+
+
+ClientBase::~ClientBase() = default;
+ClientBase::ClientBase() = default;
+
+void ClientBase::setupSignalHandler()
+{
+    QueryInterruptHandler::stop();
+
+    struct sigaction new_act;
+    memset(&new_act, 0, sizeof(new_act));
+
+    new_act.sa_handler = interruptSignalHandler;
+    new_act.sa_flags = 0;
+
+#if defined(OS_DARWIN)
+    sigemptyset(&new_act.sa_mask);
+#else
+    if (sigemptyset(&new_act.sa_mask))
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+#endif
+
+    if (sigaction(SIGINT, &new_act, nullptr))
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+
+    if (sigaction(SIGQUIT, &new_act, nullptr))
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+}
 
 
 ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_multi_statements) const
@@ -290,14 +321,17 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
     if (dialect == Dialect::kusto)
         parser = std::make_unique<ParserKQLStatement>(end, global_context->getSettings().allow_settings_after_format_in_insert);
     else if (dialect == Dialect::prql)
-        parser = std::make_unique<ParserPRQLQuery>(max_length, settings.max_parser_depth);
+        parser = std::make_unique<ParserPRQLQuery>(max_length, settings.max_parser_depth, settings.max_parser_backtracks);
     else
         parser = std::make_unique<ParserQuery>(end, global_context->getSettings().allow_settings_after_format_in_insert);
 
     if (is_interactive || ignore_error)
     {
         String message;
-        res = tryParseQuery(*parser, pos, end, message, true, "", allow_multi_statements, max_length, settings.max_parser_depth);
+        if (dialect == Dialect::kusto)
+            res = tryParseKQLQuery(*parser, pos, end, message, true, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks, true);
+        else
+            res = tryParseQuery(*parser, pos, end, message, true, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks, true);
 
         if (!res)
         {
@@ -307,7 +341,10 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
     }
     else
     {
-        res = parseQueryAndMovePosition(*parser, pos, end, "", allow_multi_statements, max_length, settings.max_parser_depth);
+        if (dialect == Dialect::kusto)
+            res = parseKQLQueryAndMovePosition(*parser, pos, end, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks);
+        else
+            res = parseQueryAndMovePosition(*parser, pos, end, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks);
     }
 
     if (is_interactive)
@@ -324,12 +361,12 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
 
 
 /// Consumes trailing semicolons and tries to consume the same-line trailing comment.
-void ClientCore::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth)
+void ClientBase::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks)
 {
     // We have to skip the trailing semicolon that might be left
     // after VALUES parsing or just after a normal semicolon-terminated query.
     Tokens after_query_tokens(this_query_end, all_queries_end);
-    IParser::Pos after_query_iterator(after_query_tokens, max_parser_depth);
+    IParser::Pos after_query_iterator(after_query_tokens, max_parser_depth, max_parser_backtracks);
     while (after_query_iterator.isValid() && after_query_iterator->type == TokenType::Semicolon)
     {
         this_query_end = after_query_iterator->end;
@@ -412,20 +449,13 @@ void ClientCore::onData(Block & block, ASTPtr parsed_query)
     if (block.rows() == 0 || (query_fuzzer_runs != 0 && processed_rows >= 100))
         return;
 
-    if (!is_interactive && partial_result_mode == PartialResultMode::Active)
-        return;
-
     /// If results are written INTO OUTFILE, we can avoid clearing progress to avoid flicker.
     if (need_render_progress && tty_buf && (!select_into_file || select_into_file_and_stdout))
         progress_indication.clearProgressOutput(*tty_buf);
 
     try
     {
-        if (partial_result_mode == PartialResultMode::Active)
-            output_format->writePartialResult(materializeBlock(block));
-        else
-            output_format->write(materializeBlock(block));
-
+        output_format->write(materializeBlock(block));
         written_first_block = true;
     }
     catch (const Exception &)
@@ -489,9 +519,6 @@ void ClientCore::onProfileInfo(const ProfileInfo & profile_info)
 void ClientCore::initOutputFormat(const Block & block, ASTPtr parsed_query)
 try
 {
-    if (partial_result_mode == PartialResultMode::NotInit)
-        partial_result_mode = PartialResultMode::Active;
-
     if (!output_format)
     {
         auto is_embedded = global_context->getApplicationType() == Context::ApplicationType::SERVER;
@@ -506,7 +533,16 @@ try
         if (!pager.empty() && !is_embedded)
         {
             if (SIG_ERR == signal(SIGPIPE, SIG_IGN))
-                throwFromErrno("Cannot set signal handler.", ErrorCodes::CANNOT_SET_SIGNAL_HANDLER);
+                throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGPIPE");
+            /// We need to reset signals that had been installed in the
+            /// setupSignalHandler() since terminal will send signals to both
+            /// processes and so signals will be delivered to the
+            /// clickhouse-client/local as well, which will be terminated when
+            /// signal will be delivered second time.
+            if (SIG_ERR == signal(SIGINT, SIG_IGN))
+                throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGINT");
+            if (SIG_ERR == signal(SIGQUIT, SIG_IGN))
+                throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGQUIT");
 
             ShellCommand::Config config(pager);
             config.pipe_stdin_only = true;
@@ -590,9 +626,9 @@ try
             }
             else if (query_with_output->out_file && !is_embedded)
             {
-                const auto & format_name = FormatFactory::instance().getFormatFromFileName(out_file);
-                if (!format_name.empty())
-                    current_format = format_name;
+                auto format_name = FormatFactory::instance().tryGetFormatFromFileName(out_file);
+                if (format_name)
+                    current_format = *format_name;
             }
         }
 
@@ -654,6 +690,30 @@ void ClientCore::initLogsOutputStream()
 
         logs_out_stream = std::make_unique<InternalTextLogs>(*wb, color_logs);
     }
+}
+
+void ClientBase::adjustSettings()
+{
+    Settings settings = global_context->getSettings();
+
+    /// NOTE: Do not forget to set changed=false to avoid sending it to the server (to avoid breakage read only profiles)
+
+    /// In case of multi-query we allow data after semicolon since it will be
+    /// parsed by the client and interpreted as new query
+    if (is_multiquery && !global_context->getSettingsRef().input_format_values_allow_data_after_semicolon.changed)
+    {
+        settings.input_format_values_allow_data_after_semicolon = true;
+        settings.input_format_values_allow_data_after_semicolon.changed = false;
+    }
+
+    /// If pager is specified then output_format_pretty_max_rows is ignored, this should be handled by pager.
+    if (!pager.empty() && !global_context->getSettingsRef().output_format_pretty_max_rows.changed)
+    {
+        settings.output_format_pretty_max_rows = std::numeric_limits<UInt64>::max();
+        settings.output_format_pretty_max_rows.changed = false;
+    }
+
+    global_context->setSettings(settings);
 }
 
 void ClientCore::initTtyBuffer(ProgressOption progress)
@@ -1256,6 +1316,15 @@ void ClientCore::resetOutput()
     {
         pager_cmd->in.close();
         pager_cmd->wait();
+
+        if (SIG_ERR == signal(SIGPIPE, SIG_DFL))
+            throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGPIPE");
+        if (SIG_ERR == signal(SIGINT, SIG_DFL))
+            throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGINT");
+        if (SIG_ERR == signal(SIGQUIT, SIG_DFL))
+            throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGQUIT");
+
+        setupSignalHandler();
     }
     pager_cmd = nullptr;
 
@@ -1321,6 +1390,31 @@ void ClientCore::setInsertionTable(const ASTInsertQuery & insert_query)
 }
 
 
+void ClientBase::addMultiquery(std::string_view query, Arguments & common_arguments) const
+{
+    common_arguments.emplace_back("--multiquery");
+    common_arguments.emplace_back("-q");
+    common_arguments.emplace_back(query);
+}
+
+namespace
+{
+bool isStdinNotEmptyAndValid(ReadBufferFromFileDescriptor & std_in)
+{
+    try
+    {
+        return !std_in.eof();
+    }
+    catch (const Exception & e)
+    {
+        if (e.code() == ErrorCodes::CANNOT_READ_FROM_FILE_DESCRIPTOR)
+            return false;
+        throw;
+    }
+}
+}
+
+
 void ClientCore::processInsertQuery(const String & query_to_execute, ASTPtr parsed_query)
 {
     auto query = query_to_execute;
@@ -1338,8 +1432,8 @@ void ClientCore::processInsertQuery(const String & query_to_execute, ASTPtr pars
     }
 
     /// Process the query that requires transferring data blocks to the server.
-    const auto parsed_insert_query = parsed_query->as<ASTInsertQuery &>();
-    if ((!parsed_insert_query.data && !parsed_insert_query.infile) && (is_interactive || (!stdin_is_a_tty && std_in.eof())))
+    const auto & parsed_insert_query = parsed_query->as<ASTInsertQuery &>();
+    if ((!parsed_insert_query.data && !parsed_insert_query.infile) && (is_interactive || (!stdin_is_a_tty && !isStdinNotEmptyAndValid(std_in))))
     {
         const auto & settings = global_context->getSettingsRef();
         if (settings.throw_if_no_data_to_insert)
@@ -1420,7 +1514,7 @@ void ClientCore::sendData(Block & sample, const ColumnsDescription & columns_des
     if (!parsed_insert_query)
         return;
 
-    bool have_data_in_stdin = !is_interactive && !stdin_is_a_tty && !std_in.eof();
+    bool have_data_in_stdin = !is_interactive && !stdin_is_a_tty && isStdinNotEmptyAndValid(std_in);
 
     if (need_render_progress)
     {
@@ -1450,7 +1544,7 @@ void ClientCore::sendData(Block & sample, const ColumnsDescription & columns_des
 
         String current_format = parsed_insert_query->format;
         if (current_format.empty())
-            current_format = FormatFactory::instance().getFormatFromFileName(in_file, true);
+            current_format = FormatFactory::instance().getFormatFromFileName(in_file);
 
         /// Create temporary storage file, to support globs and parallel reading
         /// StorageFile doesn't support ephemeral/materialized/alias columns.
@@ -1739,7 +1833,12 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
     {
         const auto * logs_level_field = set_query->changes.tryGet(std::string_view{"send_logs_level"});
         if (logs_level_field)
-            updateLoggerLevel(logs_level_field->safeGet<String>());
+        {
+            auto logs_level = logs_level_field->safeGet<String>();
+            /// Check that setting value is correct before updating logger level.
+            SettingFieldLogsLevelTraits::fromString(logs_level);
+            updateLoggerLevel(logs_level);
+        }
     }
 
     if (const auto * create_user_query = parsed_query->as<ASTCreateUserQuery>())
@@ -1757,7 +1856,6 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
     }
 
     processed_rows = 0;
-    partial_result_mode = PartialResultMode::Inactive;
     written_first_block = false;
     progress_indication.resetProgress();
     profile_events.watch.restart();
@@ -1808,10 +1906,20 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
         if (insert && insert->select)
             insert->tryFindInputFunction(input_function);
 
-        bool is_async_insert = global_context->getSettingsRef().async_insert && insert && insert->hasInlinedData();
+        bool is_async_insert_with_inlined_data = global_context->getSettingsRef().async_insert && insert && insert->hasInlinedData();
+
+        if (is_async_insert_with_inlined_data)
+        {
+            bool have_data_in_stdin = !is_interactive && !stdin_is_a_tty && isStdinNotEmptyAndValid(std_in);
+            bool have_external_data = have_data_in_stdin || insert->infile;
+
+            if (have_external_data)
+                throw Exception(ErrorCodes::NOT_IMPLEMENTED,
+                    "Processing async inserts with both inlined and external data (from stdin or infile) is not supported");
+        }
 
         /// INSERT query for which data transfer is needed (not an INSERT SELECT or input()) is processed separately.
-        if (insert && (!insert->select || input_function) && !insert->watch && !is_async_insert)
+        if (insert && (!insert->select || input_function) && !insert->watch && !is_async_insert_with_inlined_data)
         {
             if (input_function && insert->format.empty())
                 throw Exception(ErrorCodes::INVALID_USAGE_OF_INPUT, "FORMAT must be specified for function input()");
@@ -1843,7 +1951,7 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
             for (const auto & [name, value] : set_query->query_parameters)
                 query_parameters.insert_or_assign(name, value);
 
-            global_context->addQueryParameters(set_query->query_parameters);
+            global_context->addQueryParameters(NameToNameMap{set_query->query_parameters.begin(), set_query->query_parameters.end()});
         }
         if (const auto * use_query = parsed_query->as<ASTUseQuery>())
         {
@@ -1911,6 +2019,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
         return MultiQueryProcessingStage::QUERIES_END;
 
     unsigned max_parser_depth = static_cast<unsigned>(global_context->getSettingsRef().max_parser_depth);
+    unsigned max_parser_backtracks = static_cast<unsigned>(global_context->getSettingsRef().max_parser_backtracks);
 
     // If there are only comments left until the end of file, we just
     // stop. The parser can't handle this situation because it always
@@ -1921,7 +2030,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
     // and it makes more sense to treat them as such.
     {
         Tokens tokens(this_query_begin, all_queries_end);
-        IParser::Pos token_iterator(tokens, max_parser_depth);
+        IParser::Pos token_iterator(tokens, max_parser_depth, max_parser_backtracks);
         if (!token_iterator.isValid())
             return MultiQueryProcessingStage::QUERIES_END;
     }
@@ -1942,7 +2051,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
         if (ignore_error)
         {
             Tokens tokens(this_query_begin, all_queries_end);
-            IParser::Pos token_iterator(tokens, max_parser_depth);
+            IParser::Pos token_iterator(tokens, max_parser_depth, max_parser_backtracks);
             while (token_iterator->type != TokenType::Semicolon && token_iterator.isValid())
                 ++token_iterator;
             this_query_begin = token_iterator->end;
@@ -1982,7 +2091,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
     // after we have processed the query. But even this guess is
     // beneficial so that we see proper trailing comments in "echo" and
     // server log.
-    adjustQueryEnd(this_query_end, all_queries_end, max_parser_depth);
+    adjustQueryEnd(this_query_end, all_queries_end, max_parser_depth, max_parser_backtracks);
     return MultiQueryProcessingStage::EXECUTE_QUERY;
 }
 
@@ -1991,9 +2100,6 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
 {
     bool echo_query = echo_queries;
 
-    /// Test tags are started with "--" so they are interpreted as comments anyway.
-    /// But if the echo is enabled we have to remove the test tags from `all_queries_text`
-    /// because we don't want test tags to be echoed.
     {
         /// disable logs if expects errors
         TestHint test_hint(all_queries_text);
@@ -2001,6 +2107,9 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
             processTextAsSingleQuery("SET send_logs_level = 'fatal'");
     }
 
+    /// Test tags are started with "--" so they are interpreted as comments anyway.
+    /// But if the echo is enabled we have to remove the test tags from `all_queries_text`
+    /// because we don't want test tags to be echoed.
     size_t test_tags_length = getTestTagsLength(all_queries_text);
 
     /// Several queries separated by ';'.
@@ -2178,7 +2287,8 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
                     this_query_end = insert_ast->end;
                     adjustQueryEnd(
                         this_query_end, all_queries_end,
-                        static_cast<unsigned>(global_context->getSettingsRef().max_parser_depth));
+                        static_cast<unsigned>(global_context->getSettingsRef().max_parser_depth),
+                        static_cast<unsigned>(global_context->getSettingsRef().max_parser_backtracks));
                 }
 
                 // Report error.
@@ -2469,6 +2579,14 @@ bool ClientCore::processMultiQueryFromFile(const String & file_name)
 
     ReadBufferFromFile in(file_name);
     readStringUntilEOF(queries_from_file, in);
+
+    if (!has_log_comment)
+    {
+        Settings settings = global_context->getSettings();
+        /// NOTE: cannot use even weakly_canonical() since it fails for /dev/stdin due to resolving of "pipe:[X]"
+        settings.log_comment = fs::absolute(fs::path(file_name));
+        global_context->setSettings(settings);
+    }
 
     return executeMultiQuery(queries_from_file);
 }

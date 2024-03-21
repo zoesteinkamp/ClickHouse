@@ -222,6 +222,8 @@ bool canBeSafelyCasted(const DataTypePtr & from_type, const DataTypePtr & to_typ
         case TypeIndex::Function:
         case TypeIndex::AggregateFunction:
         case TypeIndex::Nothing:
+        case TypeIndex::JSONPaths:
+        case TypeIndex::Variant:
             return false;
     }
 

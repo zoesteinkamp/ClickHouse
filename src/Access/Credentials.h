@@ -93,19 +93,38 @@ class MySQLNative41Credentials : public CredentialsWithScramble
 #if USE_SSL
 // Credentials, which contain just user and its public key.
 // The validness of the key must be checked before.
-class SSHKeyPlainCredentials : public Credentials
+class SshCredentials : public Credentials
 {
 public:
-    explicit SSHKeyPlainCredentials(const String & user_name_, ssh::SSHPublicKey && key_)
-        : Credentials(user_name_), key(std::move(key_))
+    explicit SshCredentials(const String& user_name_, const String& signature_, const String& original_)
+        : Credentials(user_name_), signature(signature_), original(original_)
     {
         is_ready = true;
     }
 
-    const ssh::SSHPublicKey & getKey() const { return key; }
+    const String & getSignature() const
+    {
+        if (!isReady())
+        {
+            throwNotReady();
+        }
+        return signature;
+    }
+
+    const String & getOriginal() const
+    {
+        if (!isReady())
+        {
+            throwNotReady();
+        }
+        return original;
+    }
+
 private:
-    ssh::SSHPublicKey key;
+    String signature;
+    String original;
 };
+
 #endif
 
 }

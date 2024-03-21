@@ -12,7 +12,7 @@ namespace DB
 
 static const auto MAX_THREAD_WORK_DURATION_MS = 60000;
 
-NATSHandler::NATSHandler(uv_loop_t * loop_, Poco::Logger * log_) :
+NATSHandler::NATSHandler(uv_loop_t * loop_, LoggerPtr log_) :
     loop(loop_),
     log(log_),
     loop_running(false),
@@ -43,7 +43,7 @@ void NATSHandler::startLoop()
 
     while (loop_state.load() == Loop::RUN && duration.count() < MAX_THREAD_WORK_DURATION_MS)
     {
-        uv_run(loop, UV_RUN_DEFAULT);
+        uv_run(loop, UV_RUN_NOWAIT);
         end_time = std::chrono::steady_clock::now();
         duration = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     }

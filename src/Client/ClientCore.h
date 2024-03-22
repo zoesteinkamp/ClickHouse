@@ -100,6 +100,7 @@ protected:
 
     static void adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks);
     ASTPtr parseQuery(const char *& pos, const char * end, bool allow_multi_statements) const;
+    // void setupSignalHandler();
 
     bool executeMultiQuery(const String & all_queries_text);
     MultiQueryProcessingStage analyzeMultiQueryText(
@@ -222,8 +223,6 @@ protected:
     bool stderr_is_a_tty = false; /// stderr is a terminal.
     uint64_t terminal_width = 0;
 
-    String pager;
-
     String format; /// Query results output format.
     bool select_into_file = false; /// If writing result INTO OUTFILE. It affects progress rendering.
     bool select_into_file_and_stdout = false; /// If writing result INTO OUTFILE AND STDOUT. It affects progress rendering.
@@ -332,6 +331,9 @@ protected:
     bool allow_merge_tree_settings = false;
 
     bool cancelled = false;
+
+    /// Does log_comment has specified by user?
+    bool has_log_comment = false;
 
     bool logging_initialized = false;
 

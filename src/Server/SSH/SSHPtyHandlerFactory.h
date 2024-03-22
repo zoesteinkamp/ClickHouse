@@ -27,7 +27,7 @@ class SSHPtyHandlerFactory : public TCPServerConnectionFactory
 private:
     IServer & server;
     Poco::Logger * log;
-    ssh::SSHBind bind;
+    ::ssh::SSHBind bind;
     unsigned int max_auth_attempts;
     unsigned int auth_timeout_seconds;
     unsigned int finish_timeout_seconds;
@@ -87,8 +87,8 @@ public:
     Poco::Net::TCPServerConnection * createConnection(const Poco::Net::StreamSocket & socket, TCPServer &) override
     {
         LOG_TRACE(log, "TCP Request. Address: {}", socket.peerAddress().toString());
-        ssh::libsshLogger::initialize();
-        ssh::SSHSession session;
+        ::ssh::libsshLogger::initialize();
+        ::ssh::SSHSession session;
         session.disableSocketOwning();
         session.disableDefaultConfig();
         if (read_write_timeout_seconds.has_value() || read_write_timeout_micro_seconds.has_value())

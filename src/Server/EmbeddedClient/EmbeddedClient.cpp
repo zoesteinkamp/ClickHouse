@@ -131,7 +131,7 @@ try
     std::map<String, String> prompt_substitutions{{"display_name", server_display_name}};
     for (const auto & [key, value] : prompt_substitutions)
         boost::replace_all(prompt_by_server_display_name, "{" + key + "}", value);
-    initTtyBuffer(toProgressOption(getEnvOption<String>(envVars, "progress", "default")));
+    initTTYBuffer(toProgressOption(getEnvOption<String>(envVars, "progress", "default")));
 
     if (is_interactive)
     {

@@ -434,8 +434,11 @@ void Client::connect()
     {
         try
         {
+            const auto host = ConnectionParameters::Host{hosts_and_ports[attempted_address_index].host};
+            const auto database = ConnectionParameters::Database{default_database};
+
             connection_parameters = ConnectionParameters(
-                config(), default_database, hosts_and_ports[attempted_address_index].host, hosts_and_ports[attempted_address_index].port);
+                config(), host, database, hosts_and_ports[attempted_address_index].port);
 
             if (is_interactive)
                 std::cout << "Connecting to "

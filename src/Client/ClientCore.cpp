@@ -277,32 +277,32 @@ ClientCore::ClientCore(
 ClientCore::~ClientCore() = default;
 
 
-ClientBase::~ClientBase() = default;
-ClientBase::ClientBase() = default;
+// ClientBase::~ClientBase() = default;
+// ClientBase::ClientBase() = default;
 
-void ClientBase::setupSignalHandler()
-{
-    QueryInterruptHandler::stop();
+// void ClientCore::setupSignalHandler()
+// {
+//     query_interrupt_handler.stop();
 
-    struct sigaction new_act;
-    memset(&new_act, 0, sizeof(new_act));
+//     struct sigaction new_act;
+//     memset(&new_act, 0, sizeof(new_act));
 
-    new_act.sa_handler = interruptSignalHandler;
-    new_act.sa_flags = 0;
+//     new_act.sa_handler = interruptSignalHandler;
+//     new_act.sa_flags = 0;
 
-#if defined(OS_DARWIN)
-    sigemptyset(&new_act.sa_mask);
-#else
-    if (sigemptyset(&new_act.sa_mask))
-        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
-#endif
+// #if defined(OS_DARWIN)
+//     sigemptyset(&new_act.sa_mask);
+// #else
+//     if (sigemptyset(&new_act.sa_mask))
+//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+// #endif
 
-    if (sigaction(SIGINT, &new_act, nullptr))
-        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+//     if (sigaction(SIGINT, &new_act, nullptr))
+//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
 
-    if (sigaction(SIGQUIT, &new_act, nullptr))
-        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
-}
+//     if (sigaction(SIGQUIT, &new_act, nullptr))
+//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
+// }
 
 
 ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_multi_statements) const
@@ -361,7 +361,7 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
 
 
 /// Consumes trailing semicolons and tries to consume the same-line trailing comment.
-void ClientBase::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks)
+void ClientCore::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks)
 {
     // We have to skip the trailing semicolon that might be left
     // after VALUES parsing or just after a normal semicolon-terminated query.
@@ -426,19 +426,7 @@ void ClientCore::onData(Block & block, ASTPtr parsed_query)
     if (!block)
         return;
 
-    if (block.rows() == 0 && partial_result_mode == PartialResultMode::Active)
-    {
-        partial_result_mode = PartialResultMode::Inactive;
-        if (is_interactive)
-        {
-            progress_indication.clearProgressOutput(*tty_buf);
-            output_stream << "Full result:" << std::endl;
-            progress_indication.writeProgress(*tty_buf);
-        }
-    }
-
-    if (partial_result_mode == PartialResultMode::Inactive)
-        processed_rows += block.rows();
+    processed_rows += block.rows();
 
     /// Even if all blocks are empty, we still need to initialize the output stream to write empty resultset.
     initOutputFormat(block, parsed_query);
@@ -692,7 +680,7 @@ void ClientCore::initLogsOutputStream()
     }
 }
 
-void ClientBase::adjustSettings()
+void ClientCore::adjustSettings()
 {
     Settings settings = global_context->getSettings();
 
@@ -716,7 +704,7 @@ void ClientBase::adjustSettings()
     global_context->setSettings(settings);
 }
 
-void ClientCore::initTtyBuffer(ProgressOption progress)
+void ClientCore::initTTYBuffer(ProgressOption progress)
 {
     if (tty_buf)
         return;
@@ -976,14 +964,6 @@ void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr pa
 
     const auto & settings = global_context->getSettingsRef();
     const Int32 signals_before_stop = settings.partial_result_on_first_cancel ? 2 : 1;
-    bool has_partial_result_setting = settings.partial_result_update_duration_ms.totalMilliseconds() > 0;
-
-    if (has_partial_result_setting)
-    {
-        partial_result_mode = PartialResultMode::NotInit;
-        if (is_interactive)
-            output_stream << "Partial result:" << std::endl;
-    }
 
     int retries_left = 10;
     while (retries_left)
@@ -1324,7 +1304,7 @@ void ClientCore::resetOutput()
         if (SIG_ERR == signal(SIGQUIT, SIG_DFL))
             throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler for SIGQUIT");
 
-        setupSignalHandler();
+        // setupSignalHandler();
     }
     pager_cmd = nullptr;
 
@@ -1390,12 +1370,12 @@ void ClientCore::setInsertionTable(const ASTInsertQuery & insert_query)
 }
 
 
-void ClientBase::addMultiquery(std::string_view query, Arguments & common_arguments) const
-{
-    common_arguments.emplace_back("--multiquery");
-    common_arguments.emplace_back("-q");
-    common_arguments.emplace_back(query);
-}
+// void ClientCore::addMultiquery(std::string_view query, Arguments & common_arguments) const
+// {
+//     common_arguments.emplace_back("--multiquery");
+//     common_arguments.emplace_back("-q");
+//     common_arguments.emplace_back(query);
+// }
 
 namespace
 {

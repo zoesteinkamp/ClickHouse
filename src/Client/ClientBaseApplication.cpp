@@ -1,3 +1,4 @@
+#include "Core/BaseSettingsProgramOptions.h"
 #include <Client/ClientBaseApplication.h>
 #include <Client/LineReader.h>
 #include <Client/ClientBaseHelpers.h>
@@ -74,7 +75,7 @@
 #include <map>
 #include <unordered_map>
 
-#include "config_version.h"
+#include <Common/config_version.h>
 
 
 using namespace std::literals;
@@ -153,14 +154,14 @@ void ClientBaseApplication::setupSignalHandler()
     sigemptyset(&new_act.sa_mask);
 #else
     if (sigemptyset(&new_act.sa_mask))
-        throwFromErrno("Cannot set signal handler.", ErrorCodes::CANNOT_SET_SIGNAL_HANDLER);
+        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 #endif
 
     if (sigaction(SIGINT, &new_act, nullptr))
-        throwFromErrno("Cannot set signal handler.", ErrorCodes::CANNOT_SET_SIGNAL_HANDLER);
+        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 
     if (sigaction(SIGQUIT, &new_act, nullptr))
-        throwFromErrno("Cannot set signal handler.", ErrorCodes::CANNOT_SET_SIGNAL_HANDLER);
+        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 }
 
 
@@ -232,9 +233,9 @@ private:
 void ClientBaseApplication::parseAndCheckOptions(OptionsDescription & options_description, po::variables_map & options, Arguments & arguments)
 {
     if (allow_repeated_settings)
-        cmd_settings.addProgramOptionsAsMultitokens(options_description.main_description.value());
+        addProgramOptionsAsMultitokens(cmd_settings, options_description.main_description.value());
     else
-        cmd_settings.addProgramOptions(options_description.main_description.value());
+        addProgramOptions(cmd_settings, options_description.main_description.value());
 
     if (allow_merge_tree_settings)
     {
@@ -255,9 +256,9 @@ void ClientBaseApplication::parseAndCheckOptions(OptionsDescription & options_de
                     return;
 
                 if (allow_repeated_settings)
-                    cmd_merge_tree_settings.addProgramOptionAsMultitoken(main_options, name, setting);
+                    addProgramOptionAsMultitoken(cmd_merge_tree_settings, main_options, name, setting);
                 else
-                    cmd_merge_tree_settings.addProgramOption(main_options, name, setting);
+                    addProgramOption(cmd_merge_tree_settings, main_options, name, setting);
             };
 
             const auto & setting_name = setting.getName();

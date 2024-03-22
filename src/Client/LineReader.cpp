@@ -26,7 +26,7 @@ void trim(String & s)
 
 /// Check if multi-line query is inserted from the paste buffer.
 /// Allows delaying the start of query execution until the entirety of query is inserted.
-bool hasInputData()
+[[ maybe_unused ]] bool hasInputData()
 {
     pollfd fd{STDIN_FILENO, POLLIN, 0};
     return poll(&fd, 1, 0) == 1;

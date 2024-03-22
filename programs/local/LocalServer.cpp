@@ -440,8 +440,11 @@ void LocalServer::setupUsers()
 
 void LocalServer::connect()
 {
-    // connection_parameters = ConnectionParameters(config(), default_database);
-    connection_parameters = ConnectionParameters(config(), "localhost");
+    connection_parameters = ConnectionParameters(
+        config(),
+        ConnectionParameters::Host{"localhost"},
+        ConnectionParameters::Database{default_database}
+    );
     connection = LocalConnection::createConnection(
         connection_parameters, global_context, need_render_progress, need_render_profile_events, server_display_name);
 }

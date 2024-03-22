@@ -13,7 +13,6 @@
 
 #include <readpassphrase/readpassphrase.h>
 
-
 namespace DB
 {
 
@@ -50,26 +49,22 @@ ConnectionParameters ConnectionParameters::createForEmbedded(const String & user
     connection_params.default_database = database;
     connection_params.compression = Protocol::Compression::Disable;
 
-    connection_params.timeouts = ConnectionTimeouts(
-            Poco::Timespan(DBMS_DEFAULT_CONNECT_TIMEOUT_SEC, 0),
-            Poco::Timespan(DBMS_DEFAULT_SEND_TIMEOUT_SEC, 0),
-            Poco::Timespan(DBMS_DEFAULT_RECEIVE_TIMEOUT_SEC, 0),
-            Poco::Timespan(0, 0),
-            Poco::Timespan(DBMS_DEFAULT_RECEIVE_TIMEOUT_SEC, 0));
+    // TODO: Pass settings struct.
+    // connection_params.timeouts = ConnectionTimeouts::getTCPTimeoutsWithFailover(getGlobal);
 
     connection_params.timeouts.sync_request_timeout = Poco::Timespan(DBMS_DEFAULT_SYNC_REQUEST_TIMEOUT_SEC, 0);
     return connection_params;
 }
 
 ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config,
-                                           const std::string & database,
-                                           std::string connection_host,
-                                           std::optional<UInt16> connection_port)
-    : host(connection_host)
-    , port(connection_port.value_or(getPortFromConfig(config, connection_host)))
+                                           const Host & host_,
+                                           const Database & database,
+                                           std::optional<UInt16> port_)
+    : host(host_)
+    , port(port_.value_or(getPortFromConfig(config, host_)))
     , default_database(database)
 {
-    security = enableSecureConnection(config, connection_host) ? Protocol::Secure::Enable : Protocol::Secure::Disable;
+    security = enableSecureConnection(config, host_) ? Protocol::Secure::Enable : Protocol::Secure::Disable;
 
     /// changed the default value to "default" to fix the issue when the user in the prompt is blank
     user = config.getString("user", "default");
@@ -154,9 +149,10 @@ ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfigurati
                 Poco::Timespan(config.getInt("sync_request_timeout", DBMS_DEFAULT_SYNC_REQUEST_TIMEOUT_SEC), 0));
 }
 
-ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config, std::string connection_host)
-    : ConnectionParameters(config, config.getString("host", "localhost"), getPortFromConfig(config, connection_host))
+ConnectionParameters::ConnectionParameters(const Poco::Util::AbstractConfiguration & config_, const Host & host_, const Database & database_)
+    : ConnectionParameters(config_, host_, database_, getPortFromConfig(config_, host_))
 {
+
 }
 
 UInt16 ConnectionParameters::getPortFromConfig(const Poco::Util::AbstractConfiguration & config,

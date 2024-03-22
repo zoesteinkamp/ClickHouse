@@ -25,12 +25,18 @@ struct ConnectionParameters
     Protocol::Compression compression = Protocol::Compression::Enable;
     ConnectionTimeouts timeouts;
 
+    using Database = StrongTypedef<String, struct DatabaseTag>;
+    using Host = StrongTypedef<String, struct HostTag>;
+
+    // // We don't take database from config, as it can be changed after query execution
+    // ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host);
+    // ConnectionParameters(
+    //     const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host, std::optional<UInt16> port
+    // );
+
     ConnectionParameters() = default;
-    // We don't take database from config, as it can be changed after query execution
-    ConnectionParameters(const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host);
-    ConnectionParameters(
-        const Poco::Util::AbstractConfiguration & config, const std::string & database, std::string host, std::optional<UInt16> port
-    );
+    ConnectionParameters(const Poco::Util::AbstractConfiguration & config_, const Host & host_, const Database & database_);
+    ConnectionParameters(const Poco::Util::AbstractConfiguration & config_, const Host & host_, const Database & database_, std::optional<UInt16> port_);
 
     static UInt16 getPortFromConfig(const Poco::Util::AbstractConfiguration & config, std::string connection_host);
 

@@ -69,7 +69,7 @@ class ChannelCallback
 public:
     using DescriptorSet = IClientDescriptorSet::DescriptorSet;
 
-    explicit ChannelCallback(ssh::SSHChannel && channel_, std::unique_ptr<Session> && dbSession_)
+    explicit ChannelCallback(::ssh::SSHChannel && channel_, std::unique_ptr<Session> && dbSession_)
         : channel(std::move(channel_)), db_session(std::move(dbSession_)), log(&Poco::Logger::get("SSHChannelCallback"))
     {
         channel_cb.userdata = this;
@@ -87,7 +87,7 @@ public:
 
 
     DescriptorSet client_input_output;
-    ssh::SSHChannel channel;
+    ::ssh::SSHChannel channel;
     std::unique_ptr<Session> db_session;
     NameToNameMap env;
     std::optional<EmbeddedClientRunner> client_runner;
@@ -299,7 +299,7 @@ int process_stderr(socket_t fd, int revents, void * userdata)
 class SessionCallback
 {
 public:
-    explicit SessionCallback(ssh::SSHSession & session, IServer & server, const Poco::Net::SocketAddress & address_)
+    explicit SessionCallback(::ssh::SSHSession & session, IServer & server, const Poco::Net::SocketAddress & address_)
         : server_context(server.context()), peer_address(address_), log(&Poco::Logger::get("SSHSessionCallback"))
     {
         server_cb.userdata = this;
@@ -328,7 +328,7 @@ private:
         }
         try
         {
-            auto channel = ssh::SSHChannel(session);
+            auto channel = ::ssh::SSHChannel(session);
             channel_callback = std::make_unique<ChannelCallback>(std::move(channel), std::move(db_session));
             return channel_callback->channel.getCChannelPtr();
         }
@@ -389,9 +389,12 @@ private:
                 return SSH_AUTH_DENIED;
             }
 
+            /// FIXME: Generate random string
+            String challenge="Hello...";
+
             // The signature is checked, so just verify that user is associated with publickey.
             // Function will throw if authentication fails.
-            db_session_created->authenticate(SSHKeyPlainCredentials{user_name, ssh::SSHPublicKey::createNonOwning(key)}, peer_address);
+            db_session_created->authenticate(SshCredentials{user_name, ssh::SSHKey(key).signString(challenge), challenge}, peer_address);
 
 
             authenticated = true;
@@ -414,7 +417,7 @@ private:
 
 SSHPtyHandler::SSHPtyHandler(
     IServer & server_,
-    ssh::SSHSession && session_,
+    ::ssh::SSHSession && session_,
     const Poco::Net::StreamSocket & socket,
     unsigned int max_auth_attempts_,
     unsigned int auth_timeout_seconds_,
@@ -433,7 +436,7 @@ SSHPtyHandler::SSHPtyHandler(
 
 void SSHPtyHandler::run()
 {
-    ssh::SSHEvent event;
+    ::ssh::SSHEvent event;
     SessionCallback sdata(session, server, socket().peerAddress());
     session.handleKeyExchange();
     event.addSession(session);

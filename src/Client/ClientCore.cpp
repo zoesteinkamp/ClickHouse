@@ -16,7 +16,6 @@
 #include <Common/Exception.h>
 #include <Common/getNumberOfPhysicalCPUCores.h>
 #include <Common/typeid_cast.h>
-#include <Common/UTF8Helpers.h>
 #include <Common/TerminalSize.h>
 #include <Common/clearPasswordFromCommandLine.h>
 #include <Common/StringUtils/StringUtils.h>
@@ -69,6 +68,9 @@
 #include <Storages/ColumnsDescription.h>
 
 #include <boost/algorithm/string/case_conv.hpp>
+#include <boost/algorithm/string/replace.hpp>
+#include <boost/algorithm/string/split.hpp>
+
 #include <iostream>
 #include <filesystem>
 #include <limits>
@@ -2621,6 +2623,46 @@ void ClientCore::runNonInteractive()
             processQueryText(text);
     }
 }
+
+
+#if defined(FUZZING_MODE)
+extern "C" int LLVMFuzzerRunDriver(int * argc, char *** argv, int (*callback)(const uint8_t * data, size_t size));
+ClientCore * app;
+
+void ClientCore::runLibFuzzer()
+{
+    app = this;
+    std::vector<String> fuzzer_args_holder;
+
+    if (const char * fuzzer_args_env = getenv("FUZZER_ARGS")) // NOLINT(concurrency-mt-unsafe)
+        boost::split(fuzzer_args_holder, fuzzer_args_env, isWhitespaceASCII, boost::token_compress_on);
+
+    std::vector<char *> fuzzer_args;
+    fuzzer_args.push_back(argv0);
+    for (auto & arg : fuzzer_args_holder)
+        fuzzer_args.emplace_back(arg.data());
+
+    int fuzzer_argc = fuzzer_args.size();
+    char ** fuzzer_argv = fuzzer_args.data();
+
+    LLVMFuzzerRunDriver(&fuzzer_argc, &fuzzer_argv, [](const uint8_t * data, size_t size)
+    {
+        try
+        {
+            String query(reinterpret_cast<const char *>(data), size);
+            app->processQueryText(query);
+        }
+        catch (...)
+        {
+            return -1;
+        }
+
+        return 0;
+    });
+}
+#else
+void ClientCore::runLibFuzzer() {}
+#endif
 
 
 void ClientCore::clearTerminal()

@@ -1,6 +1,7 @@
 #pragma once
 
-#include "LineReader.h"
+#include <Client/LineReader.h>
+#include <base/strong_typedef.h>
 #include <replxx.hxx>
 
 namespace DB
@@ -17,7 +18,7 @@ public:
         Patterns delimiters_,
         const char word_break_characters_[],
         replxx::Replxx::highlighter_callback_t highlighter_,
-        std::istream & input_stream_ = std::cin, 
+        std::istream & input_stream_ = std::cin,
         std::ostream & output_stream_ = std::cout,
         int in_fd_ = STDIN_FILENO,
         int out_fd_ = STDOUT_FILENO,

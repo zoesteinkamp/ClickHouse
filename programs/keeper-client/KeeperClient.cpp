@@ -315,7 +315,8 @@ void KeeperClient::runInteractiveReplxx()
         query_extenders,
         query_delimiters,
         word_break_characters,
-        /* highlighter_= */ {});
+        /* highlighter_= */ {}
+    );
     lr.enableBracketedPaste();
 
     while (true)

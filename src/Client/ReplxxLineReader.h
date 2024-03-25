@@ -16,7 +16,12 @@ public:
         Patterns extenders_,
         Patterns delimiters_,
         const char word_break_characters_[],
-        replxx::Replxx::highlighter_callback_t highlighter_);
+        replxx::Replxx::highlighter_callback_t highlighter_,
+        std::istream & input_stream_ = std::cin, 
+        std::ostream & output_stream_ = std::cout,
+        int in_fd_ = STDIN_FILENO,
+        int out_fd_ = STDOUT_FILENO,
+        int err_fd_ = STDERR_FILENO);
     ~ReplxxLineReader() override;
 
     void enableBracketedPaste() override;

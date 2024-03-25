@@ -2425,18 +2425,12 @@ void ClientCore::runInteractive()
 
 
 #if USE_REPLXX
-    if (global_context->getApplicationType() == Context::ApplicationType::SERVER)
-    {
-        lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
-    }
-    else
-    {
-        replxx::Replxx::highlighter_callback_t highlight_callback{};
-        if (enable_highlight)
-            highlight_callback = highlight;
+    replxx::Replxx::highlighter_callback_t highlight_callback{};
+    if (enable_highlight)
+        highlight_callback = highlight;
 
-        lr = std::make_unique<ReplxxLineReader>(*suggest, history_file, multiline, query_extenders, query_delimiters, word_break_characters, highlight_callback);
-    }
+    // lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
+    lr = std::make_unique<ReplxxLineReader>(*suggest, history_file, multiline, query_extenders, query_delimiters, word_break_characters, highlight_callback, input_stream, output_stream, in_fd, out_fd, err_fd);
 #else
     lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
 #endif

@@ -297,8 +297,15 @@ ReplxxLineReader::ReplxxLineReader(
     Patterns extenders_,
     Patterns delimiters_,
     const char word_break_characters_[],
-    replxx::Replxx::highlighter_callback_t highlighter_)
-    : LineReader(history_file_path_, multiline_, std::move(extenders_), std::move(delimiters_)), highlighter(std::move(highlighter_))
+    replxx::Replxx::highlighter_callback_t highlighter_,
+    std::istream & input_stream_, 
+    std::ostream & output_stream_,
+    int in_fd_,
+    int out_fd_,
+    int err_fd_)
+    : LineReader(history_file_path_, multiline_, std::move(extenders_), std::move(delimiters_), input_stream_, output_stream_, in_fd_)
+    , rx(input_stream_, output_stream_, in_fd_, out_fd_, err_fd_)
+    , highlighter(std::move(highlighter_))
     , word_break_characters(word_break_characters_)
     , editor(getEditor())
 {

@@ -689,7 +689,7 @@ class CiCache:
 
         # FIXME: temporary experiment: lets enable await for PR' workflows awaiting on build' jobs only
         if not is_release:
-            MAX_ROUNDS_TO_WAIT = 1
+            MAX_ROUNDS_TO_WAIT = 2
             remove_from_wait = []
             for job in self.jobs_to_wait:
                 if job not in Build:
@@ -752,8 +752,9 @@ class CiCache:
                             await_finished.add(job_name)
 
                 for job in await_finished:
-                    self.jobs_to_skip.append(job)
                     del self.jobs_to_wait[job]
+                    del self.jobs_to_do[job]
+                    self.jobs_to_skip.append(job)
 
                 expired_sec = int(time.time()) - start_at
                 print(

@@ -978,9 +978,14 @@ def main() -> int:
         )
         ci_cache.print_status()
 
-        if CI and not pr_info.is_merge_queue:
-            # wait for pending jobs to be finished, await_jobs is a long blocking call
-            ci_cache.await_pending_jobs(pr_info.is_release)
+        if CI:
+            if pr_info.is_merge_queue:
+                for job in ci_cache.jobs_to_wait:
+                    print(f"Job [{job}] not affected by the change - remove from MergeQueue CI")
+                    del ci_cache.jobs_to_do[job]
+            else:
+                # wait for pending jobs to be finished, await_jobs is a long blocking call
+                ci_cache.await_pending_jobs(pr_info.is_release)
 
             if pr_info.is_release:
                 ci_cache.push_pending_all(pr_info.is_release)

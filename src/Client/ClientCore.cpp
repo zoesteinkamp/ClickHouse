@@ -18,9 +18,10 @@
 #include <Common/typeid_cast.h>
 #include <Common/TerminalSize.h>
 #include <Common/clearPasswordFromCommandLine.h>
-#include <Common/StringUtils/StringUtils.h>
+#include <Common/StringUtils.h>
 #include <Common/filesystemHelpers.h>
 #include <Common/NetException.h>
+#include <Common/tryGetFileNameByFileDescriptor.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnsNumber.h>
 #include <Formats/FormatFactory.h>
@@ -43,13 +44,12 @@
 #include <Parsers/ASTIdentifier.h>
 #include <Parsers/ASTColumnDeclaration.h>
 #include <Parsers/ASTFunction.h>
-#include <Parsers/Kusto/ParserKQLStatement.h>
 #include <Parsers/PRQL/ParserPRQLQuery.h>
+#include <Parsers/Kusto/ParserKQLStatement.h>
 #include <Parsers/Kusto/parseKQLQuery.h>
 
 #include <Processors/Formats/Impl/NullFormat.h>
 #include <Processors/Formats/IInputFormat.h>
-#include <Processors/Formats/IOutputFormat.h>
 #include <Processors/QueryPlan/QueryPlan.h>
 #include <Processors/QueryPlan/BuildQueryPipelineSettings.h>
 #include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
@@ -257,7 +257,6 @@ public:
     using Exception::Exception;
 };
 
-
 ClientCore::ClientCore(
     int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_)
     : std_in(in_fd_)
@@ -307,12 +306,11 @@ ClientCore::~ClientCore() = default;
 // }
 
 
-ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_multi_statements) const
+ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool is_interactive, bool ignore_error)
 {
     std::unique_ptr<IParserBase> parser;
     ASTPtr res;
 
-    const auto & settings = global_context->getSettingsRef();
     size_t max_length = 0;
 
     if (!allow_multi_statements)
@@ -321,11 +319,11 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, bool allow_mu
     const Dialect & dialect = settings.dialect;
 
     if (dialect == Dialect::kusto)
-        parser = std::make_unique<ParserKQLStatement>(end, global_context->getSettings().allow_settings_after_format_in_insert);
+        parser = std::make_unique<ParserKQLStatement>(end, settings.allow_settings_after_format_in_insert);
     else if (dialect == Dialect::prql)
         parser = std::make_unique<ParserPRQLQuery>(max_length, settings.max_parser_depth, settings.max_parser_backtracks);
     else
-        parser = std::make_unique<ParserQuery>(end, global_context->getSettings().allow_settings_after_format_in_insert);
+        parser = std::make_unique<ParserQuery>(end, settings.allow_settings_after_format_in_insert);
 
     if (is_interactive || ignore_error)
     {
@@ -418,8 +416,7 @@ void ClientCore::sendExternalTables(ASTPtr parsed_query)
     for (auto & table : external_tables)
         data.emplace_back(table.getData(global_context));
 
-    if (send_external_tables)
-        connection->sendExternalTablesData(data);
+    connection->sendExternalTablesData(data);
 }
 
 
@@ -544,7 +541,7 @@ try
             out_buf = &std_out;
         }
 
-        String current_format = format;
+        String current_format = default_output_format;
 
         select_into_file = false;
         select_into_file_and_stdout = false;
@@ -629,6 +626,9 @@ try
         bool extras_into_stdout = need_render_progress || logs_into_stdout;
         bool select_only_into_file = select_into_file && !select_into_file_and_stdout;
 
+        if (!out_file_buf && default_output_compression_method != CompressionMethod::None)
+            out_file_buf = wrapWriteBufferWithCompressionMethod(out_buf, default_output_compression_method, 3, 0);
+
         /// It is not clear how to write progress and logs
         /// intermixed with data with parallel formatting.
         /// It may increase code complexity significantly.
@@ -696,14 +696,109 @@ void ClientCore::adjustSettings()
         settings.input_format_values_allow_data_after_semicolon.changed = false;
     }
 
-    /// If pager is specified then output_format_pretty_max_rows is ignored, this should be handled by pager.
-    if (!pager.empty() && !global_context->getSettingsRef().output_format_pretty_max_rows.changed)
+    /// Do not limit pretty format output in case of --pager specified or in case of stdout is not a tty.
+    if (!pager.empty() || !stdout_is_a_tty)
     {
-        settings.output_format_pretty_max_rows = std::numeric_limits<UInt64>::max();
-        settings.output_format_pretty_max_rows.changed = false;
+        if (!global_context->getSettingsRef().output_format_pretty_max_rows.changed)
+        {
+            settings.output_format_pretty_max_rows = std::numeric_limits<UInt64>::max();
+            settings.output_format_pretty_max_rows.changed = false;
+        }
+
+        if (!global_context->getSettingsRef().output_format_pretty_max_value_width.changed)
+        {
+            settings.output_format_pretty_max_value_width = std::numeric_limits<UInt64>::max();
+            settings.output_format_pretty_max_value_width.changed = false;
+        }
     }
 
     global_context->setSettings(settings);
+}
+
+
+bool ClientCore::isRegularFile(int fd)
+{
+    struct stat file_stat;
+    return fstat(fd, &file_stat) == 0 && S_ISREG(file_stat.st_mode);
+}
+
+void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
+{
+    if (config().has("output-format"))
+    {
+        default_output_format = config().getString("output-format");
+        is_default_format = false;
+    }
+    else if (config().has("format"))
+    {
+        default_output_format = config().getString("format");
+        is_default_format = false;
+    }
+    else if (config().has("vertical"))
+    {
+        default_output_format = "Vertical";
+        is_default_format = false;
+    }
+    else if (isRegularFile(STDOUT_FILENO))
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDOUT_FILENO);
+        if (format_from_file_name)
+            default_output_format = *format_from_file_name;
+        else
+            default_output_format = "TSV";
+
+        std::optional<String> file_name = tryGetFileNameFromFileDescriptor(STDOUT_FILENO);
+        if (file_name)
+            default_output_compression_method = chooseCompressionMethod(*file_name, "");
+    }
+    else if (is_interactive)
+    {
+        default_output_format = "PrettyCompact";
+    }
+    else
+    {
+        default_output_format = "TSV";
+    }
+
+    if (config().has("input-format"))
+    {
+        default_input_format = config().getString("input-format");
+    }
+    else if (config().has("format"))
+    {
+        default_input_format = config().getString("format");
+    }
+    else if (config().getString("table-file", "-") != "-")
+    {
+        auto file_name = config().getString("table-file");
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileName(file_name);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+    else
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDIN_FILENO);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+
+    format_max_block_size = config().getUInt64("format_max_block_size",
+        global_context->getSettingsRef().max_block_size);
+
+    /// Setting value from cmd arg overrides one from config
+    if (global_context->getSettingsRef().max_insert_block_size.changed)
+    {
+        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
+    }
+    else
+    {
+        insert_format_max_block_size = config().getUInt64("insert_format_max_block_size",
+            global_context->getSettingsRef().max_insert_block_size);
+    }
 }
 
 void ClientCore::initTTYBuffer(ProgressOption progress)
@@ -820,7 +915,11 @@ void ClientCore::processTextAsSingleQuery(const String & full_query)
     /// Some parts of a query (result output and formatting) are executed
     /// client-side. Thus we need to parse the query.
     const char * begin = full_query.data();
-    auto parsed_query = parseQuery(begin, begin + full_query.size(), false);
+    auto parsed_query = parseQuery(begin, begin + full_query.size(),
+        global_context->getSettingsRef(),
+        /*allow_multi_statements=*/ false,
+        is_interactive,
+        ignore_error);
 
     if (!parsed_query)
         return;
@@ -865,9 +964,6 @@ void ClientCore::processTextAsSingleQuery(const String & full_query)
 
 void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr parsed_query)
 {
-    if (fake_drop && parsed_query->as<ASTDropQuery>())
-        return;
-
     auto query = query_to_execute;
 
     /// Rewrite query only when we have query parameters.
@@ -1086,7 +1182,10 @@ void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
         std::rethrow_exception(local_format_error);
 
     if (cancelled && is_interactive)
+    {
         output_stream << "Query was cancelled." << std::endl;
+        cancelled_printed = true;
+    }
 }
 
 
@@ -1200,8 +1299,13 @@ void ClientCore::onEndOfStream()
 
     resetOutput();
 
-    if (is_interactive && !written_first_block)
-        output_stream << "Ok." << std::endl;
+    if (is_interactive)
+    {
+        if (cancelled && !cancelled_printed)
+            output_stream << "Query was cancelled." << std::endl;
+        else if (!written_first_block)
+            output_stream << "Ok." << std::endl;
+    }
 }
 
 
@@ -1623,7 +1727,7 @@ void ClientCore::sendData(Block & sample, const ColumnsDescription & columns_des
 
 void ClientCore::sendDataFrom(ReadBuffer & buf, Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query, bool have_more_data)
 {
-    String current_format = insert_format;
+    String current_format = "Values";
 
     /// Data format can be specified in the INSERT query.
     if (const auto * insert = parsed_query->as<ASTInsertQuery>())
@@ -1788,6 +1892,7 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
     resetOutput();
     have_error = false;
     cancelled = false;
+    cancelled_printed = false;
     client_exception.reset();
     server_exception.reset();
 
@@ -1901,7 +2006,7 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
         }
 
         /// INSERT query for which data transfer is needed (not an INSERT SELECT or input()) is processed separately.
-        if (insert && (!insert->select || input_function) && !insert->watch && !is_async_insert_with_inlined_data)
+        if (insert && (!insert->select || input_function) && !is_async_insert_with_inlined_data)
         {
             if (input_function && insert->format.empty())
                 throw Exception(ErrorCodes::INVALID_USAGE_OF_INPUT, "FORMAT must be specified for function input()");
@@ -1992,7 +2097,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
         return MultiQueryProcessingStage::QUERIES_END;
 
     // Remove leading empty newlines and other whitespace, because they
-    // are annoying to filter in query log. This is mostly relevant for
+    // are annoying to filter in the query log. This is mostly relevant for
     // the tests.
     while (this_query_begin < all_queries_end && isWhitespaceASCII(*this_query_begin))
         ++this_query_begin;
@@ -2020,9 +2125,13 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
     this_query_end = this_query_begin;
     try
     {
-        parsed_query = parseQuery(this_query_end, all_queries_end, true);
+        parsed_query = parseQuery(this_query_end, all_queries_end,
+            global_context->getSettingsRef(),
+            /*allow_multi_statements=*/ true,
+            is_interactive,
+            ignore_error);
     }
-    catch (Exception & e)
+    catch (const Exception & e)
     {
         current_exception.reset(e.clone());
         return MultiQueryProcessingStage::PARSING_EXCEPTION;
@@ -2047,9 +2156,9 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
     // INSERT queries may have the inserted data in the query text
     // that follow the query itself, e.g. "insert into t format CSV 1;2".
     // They need special handling. First of all, here we find where the
-    // inserted data ends. In multy-query mode, it is delimited by a
+    // inserted data ends. In multi-query mode, it is delimited by a
     // newline.
-    // The VALUES format needs even more handling -- we also allow the
+    // The VALUES format needs even more handling - we also allow the
     // data to be delimited by semicolon. This case is handled later by
     // the format parser itself.
     // We can't do multiline INSERTs with inline data, because most
@@ -2395,10 +2504,28 @@ void ClientCore::runInteractive()
     {
         /// Load suggestion data from the server.
         if (global_context->getApplicationType() == Context::ApplicationType::CLIENT)
-            suggest->load<Connection>(global_context, connection_parameters, suggestion_limit);
+            suggest->load<Connection>(global_context, connection_parameters, suggestion_limit, wait_for_suggestions_to_load);
         else if (global_context->getApplicationType() == Context::ApplicationType::LOCAL)
-            suggest->load<LocalConnection>(global_context, connection_parameters, suggestion_limit);
-        // Embedded type will not work here, as we need to 1. refactor replxx, 2. refactor Suggest
+            suggest->load<LocalConnection>(global_context, connection_parameters, suggestion_limit, wait_for_suggestions_to_load);
+    }
+
+    if (home_path.empty())
+    {
+        const char * home_path_cstr = getenv("HOME"); // NOLINT(concurrency-mt-unsafe)
+        if (home_path_cstr)
+            home_path = home_path_cstr;
+    }
+
+    /// Load command history if present.
+    if (config().has("history_file"))
+        history_file = config().getString("history_file");
+    else
+    {
+        auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
+        if (history_file_from_env)
+            history_file = history_file_from_env;
+        else if (!home_path.empty())
+            history_file = home_path + "/.clickhouse-client-history";
     }
 
     if (!history_file.empty() && !fs::exists(history_file))
@@ -2528,7 +2655,7 @@ void ClientCore::runInteractive()
         {
             // If a separate connection loading suggestions failed to open a new session,
             // use the main session to receive them.
-            suggest->load(*connection, connection_parameters.timeouts, suggestion_limit);
+            suggest->load(*connection, connection_parameters.timeouts, suggestion_limit, global_context->getClientInfo());
         }
 
         try

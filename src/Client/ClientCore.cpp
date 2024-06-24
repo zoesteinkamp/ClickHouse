@@ -84,7 +84,6 @@
 namespace fs = std::filesystem;
 using namespace std::literals;
 
-
 namespace DB
 {
 
@@ -801,7 +800,6 @@ void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
             global_context->getSettingsRef().max_insert_block_size);
     }
 }
-
 
 
 void ClientCore::initTTYBuffer(ProgressOption progress)

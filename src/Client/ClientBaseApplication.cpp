@@ -125,12 +125,12 @@ void interruptSignalHandler(int signum)
 
 void ClientBaseApplication::initUserProvidedQueryIdFormats()
 {
-    if (config().has("query_id_formats"))
+    if (getClientConfiguration().has("query_id_formats"))
     {
         Poco::Util::AbstractConfiguration::Keys keys;
-        config().keys("query_id_formats", keys);
+        getClientConfiguration().keys("query_id_formats", keys);
         for (const auto & name : keys)
-            query_id_formats.emplace_back(name + ":", config().getString("query_id_formats." + name));
+            query_id_formats.emplace_back(name + ":", getClientConfiguration().getString("query_id_formats." + name));
     }
 }
 
@@ -310,86 +310,10 @@ void ClientBaseApplication::addMultiquery(std::string_view query, Arguments & co
     common_arguments.emplace_back(query);
 }
 
-
-void ClientBaseApplication::setDefaultFormatsAndCompressionFromConfiguration()
+Poco::Util::LayeredConfiguration & ClientBaseApplication::getClientConfiguration()
 {
-    if (config().has("output-format"))
-    {
-        default_output_format = config().getString("output-format");
-        is_default_format = false;
-    }
-    else if (config().has("format"))
-    {
-        default_output_format = config().getString("format");
-        is_default_format = false;
-    }
-    else if (config().has("vertical"))
-    {
-        default_output_format = "Vertical";
-        is_default_format = false;
-    }
-    else if (isRegularFile(STDOUT_FILENO))
-    {
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDOUT_FILENO);
-        if (format_from_file_name)
-            default_output_format = *format_from_file_name;
-        else
-            default_output_format = "TSV";
-
-        std::optional<String> file_name = tryGetFileNameFromFileDescriptor(STDOUT_FILENO);
-        if (file_name)
-            default_output_compression_method = chooseCompressionMethod(*file_name, "");
-    }
-    else if (is_interactive)
-    {
-        default_output_format = "PrettyCompact";
-    }
-    else
-    {
-        default_output_format = "TSV";
-    }
-
-    if (config().has("input-format"))
-    {
-        default_input_format = config().getString("input-format");
-    }
-    else if (config().has("format"))
-    {
-        default_input_format = config().getString("format");
-    }
-    else if (config().getString("table-file", "-") != "-")
-    {
-        auto file_name = config().getString("table-file");
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileName(file_name);
-        if (format_from_file_name)
-            default_input_format = *format_from_file_name;
-        else
-            default_input_format = "TSV";
-    }
-    else
-    {
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDIN_FILENO);
-        if (format_from_file_name)
-            default_input_format = *format_from_file_name;
-        else
-            default_input_format = "TSV";
-    }
-
-    format_max_block_size = config().getUInt64("format_max_block_size",
-        global_context->getSettingsRef().max_block_size);
-
-    /// Setting value from cmd arg overrides one from config
-    if (global_context->getSettingsRef().max_insert_block_size.changed)
-    {
-        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
-    }
-    else
-    {
-        insert_format_max_block_size = config().getUInt64("insert_format_max_block_size",
-            global_context->getSettingsRef().max_insert_block_size);
-    }
+    return config();
 }
-
 
 void ClientBaseApplication::init(int argc, char ** argv)
 {
@@ -523,31 +447,31 @@ void ClientBaseApplication::init(int argc, char ** argv)
     if (options.count("time"))
         print_time_to_stderr = true;
     if (options.count("query"))
-        config().setString("query", options["query"].as<std::string>());
+        getClientConfiguration().setString("query", options["query"].as<std::string>());
     if (options.count("query_id"))
-        config().setString("query_id", options["query_id"].as<std::string>());
+        getClientConfiguration().setString("query_id", options["query_id"].as<std::string>());
     if (options.count("database"))
-        config().setString("database", options["database"].as<std::string>());
+        getClientConfiguration().setString("database", options["database"].as<std::string>());
     if (options.count("config-file"))
-        config().setString("config-file", options["config-file"].as<std::string>());
+        getClientConfiguration().setString("config-file", options["config-file"].as<std::string>());
     if (options.count("queries-file"))
         queries_files = options["queries-file"].as<std::vector<std::string>>();
     if (options.count("multiline"))
-        config().setBool("multiline", true);
+        getClientConfiguration().setBool("multiline", true);
     if (options.count("multiquery"))
-        config().setBool("multiquery", true);
+        getClientConfiguration().setBool("multiquery", true);
     if (options.count("ignore-error"))
-        config().setBool("ignore-error", true);
+        getClientConfiguration().setBool("ignore-error", true);
     if (options.count("format"))
-        config().setString("format", options["format"].as<std::string>());
+        getClientConfiguration().setString("format", options["format"].as<std::string>());
     if (options.count("vertical"))
-        config().setBool("vertical", true);
+        getClientConfiguration().setBool("vertical", true);
     if (options.count("stacktrace"))
-        config().setBool("stacktrace", true);
+        getClientConfiguration().setBool("stacktrace", true);
     if (options.count("print-profile-events"))
-        config().setBool("print-profile-events", true);
+        getClientConfiguration().setBool("print-profile-events", true);
     if (options.count("profile-events-delay-ms"))
-        config().setUInt64("profile-events-delay-ms", options["profile-events-delay-ms"].as<UInt64>());
+        getClientConfiguration().setUInt64("profile-events-delay-ms", options["profile-events-delay-ms"].as<UInt64>());
     if (options.count("processed-rows"))
         print_num_processed_rows = true;
     if (options.count("progress"))
@@ -555,35 +479,35 @@ void ClientBaseApplication::init(int argc, char ** argv)
         switch (options["progress"].as<ProgressOption>())
         {
             case DEFAULT:
-                config().setString("progress", "default");
+                getClientConfiguration().setString("progress", "default");
                 break;
             case OFF:
-                config().setString("progress", "off");
+                getClientConfiguration().setString("progress", "off");
                 break;
             case TTY:
-                config().setString("progress", "tty");
+                getClientConfiguration().setString("progress", "tty");
                 break;
             case ERR:
-                config().setString("progress", "err");
+                getClientConfiguration().setString("progress", "err");
                 break;
         }
     }
     if (options.count("echo"))
-        config().setBool("echo", true);
+        getClientConfiguration().setBool("echo", true);
     if (options.count("disable_suggestion"))
-        config().setBool("disable_suggestion", true);
+        getClientConfiguration().setBool("disable_suggestion", true);
     if (options.count("suggestion_limit"))
-        config().setInt("suggestion_limit", options["suggestion_limit"].as<int>());
+        getClientConfiguration().setInt("suggestion_limit", options["suggestion_limit"].as<int>());
     if (options.count("highlight"))
-        config().setBool("highlight", options["highlight"].as<bool>());
+        getClientConfiguration().setBool("highlight", options["highlight"].as<bool>());
     if (options.count("history_file"))
-        config().setString("history_file", options["history_file"].as<std::string>());
+        getClientConfiguration().setString("history_file", options["history_file"].as<std::string>());
     if (options.count("verbose"))
-        config().setBool("verbose", true);
+        getClientConfiguration().setBool("verbose", true);
     if (options.count("interactive"))
-        config().setBool("interactive", true);
+        getClientConfiguration().setBool("interactive", true);
     if (options.count("pager"))
-        config().setString("pager", options["pager"].as<std::string>());
+        getClientConfiguration().setString("pager", options["pager"].as<std::string>());
 
     if (options.count("log-level"))
         Poco::Logger::root().setLevel(options["log-level"].as<std::string>());
@@ -601,13 +525,13 @@ void ClientBaseApplication::init(int argc, char ** argv)
         alias_names.reserve(options_description.main_description->options().size());
         for (const auto& option : options_description.main_description->options())
             alias_names.insert(option->long_name());
-        argsToConfig(common_arguments, config(), 100, &alias_names);
+        argsToConfig(common_arguments, getClientConfiguration(), 100, &alias_names);
     }
 
     clearPasswordFromCommandLine(argc, argv);
 
     /// Limit on total memory usage
-    size_t max_client_memory_usage = config().getInt64("max_memory_usage_in_client", 0 /*default value*/);
+    size_t max_client_memory_usage = getClientConfiguration().getInt64("max_memory_usage_in_client", 0 /*default value*/);
     if (max_client_memory_usage != 0)
     {
         total_memory_tracker.setHardLimit(max_client_memory_usage);

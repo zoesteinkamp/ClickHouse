@@ -45,13 +45,14 @@ public:
     ClientBaseApplication();
     ~ClientBaseApplication() override;
 
-    void setDefaultFormatsAndCompressionFromConfiguration();
-
     void init(int argc, char ** argv);
 
     std::vector<String> getAllRegisteredNames() const override { return cmd_options; }
 
 protected:
+
+    Poco::Util::LayeredConfiguration & getClientConfiguration() override;
+
     static void setupSignalHandler();
 
     virtual void readArguments(

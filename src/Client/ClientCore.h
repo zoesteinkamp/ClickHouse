@@ -86,6 +86,9 @@ protected:
     char * argv0 = nullptr;
     void runLibFuzzer();
 
+    /// This is the analogue of Poco::Application::config()
+    virtual Poco::Util::LayeredConfiguration & getClientConfiguration() = 0;
+
     virtual bool processWithFuzzing(const String &)
     {
         throw Exception(ErrorCodes::NOT_IMPLEMENTED, "Query processing with fuzzing is not implemented");
@@ -212,6 +215,8 @@ protected:
 
     /// Adjust some settings after command line options and config had been processed.
     void adjustSettings();
+
+    void setDefaultFormatsAndCompressionFromConfiguration();
 
     void initTTYBuffer(ProgressOption progress);
 

@@ -8,7 +8,11 @@
 #include <Loggers/Loggers.h>
 #include <Common/InterruptListener.h>
 #include <Common/StatusFile.h>
+#include <Common/Config/ConfigHelper.h>
+#include <Common/Config/ConfigProcessor.h>
 
+
+#include <Poco/Util/LayeredConfiguration.h>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -32,6 +36,9 @@ public:
         : ClientCore(in_fd_, out_fd_, err_fd_, input_stream_, output_stream_, error_stream_), session(std::move(session_))
     {
         global_context = session->makeSessionContext();
+        configuration = ConfigHelper::createEmpty();
+        layered_configuration = new Poco::Util::LayeredConfiguration();
+        layered_configuration->add(configuration);
     }
 
     int run(const NameToNameMap & envVars, const String & first_query);
@@ -41,6 +48,8 @@ public:
 protected:
     void connect() override;
 
+    Poco::Util::LayeredConfiguration & getClientConfiguration() override;
+
     void processError(const String & query) const override;
 
     String getName() const override { return "embedded"; }
@@ -49,6 +58,9 @@ private:
     void cleanup();
 
     std::unique_ptr<Session> session;
+
+    ConfigurationPtr configuration;
+    Poco::AutoPtr<Poco::Util::LayeredConfiguration> layered_configuration;
 };
 
 }

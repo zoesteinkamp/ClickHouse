@@ -723,6 +723,87 @@ bool ClientCore::isRegularFile(int fd)
 }
 
 
+void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
+{
+    if (getClientConfiguration().has("output-format"))
+    {
+        default_output_format = getClientConfiguration().getString("output-format");
+        is_default_format = false;
+    }
+    else if (getClientConfiguration().has("format"))
+    {
+        default_output_format = getClientConfiguration().getString("format");
+        is_default_format = false;
+    }
+    else if (getClientConfiguration().has("vertical"))
+    {
+        default_output_format = "Vertical";
+        is_default_format = false;
+    }
+    else if (isRegularFile(STDOUT_FILENO))
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDOUT_FILENO);
+        if (format_from_file_name)
+            default_output_format = *format_from_file_name;
+        else
+            default_output_format = "TSV";
+
+        std::optional<String> file_name = tryGetFileNameFromFileDescriptor(STDOUT_FILENO);
+        if (file_name)
+            default_output_compression_method = chooseCompressionMethod(*file_name, "");
+    }
+    else if (is_interactive)
+    {
+        default_output_format = "PrettyCompact";
+    }
+    else
+    {
+        default_output_format = "TSV";
+    }
+
+    if (getClientConfiguration().has("input-format"))
+    {
+        default_input_format = getClientConfiguration().getString("input-format");
+    }
+    else if (getClientConfiguration().has("format"))
+    {
+        default_input_format = getClientConfiguration().getString("format");
+    }
+    else if (getClientConfiguration().getString("table-file", "-") != "-")
+    {
+        auto file_name = getClientConfiguration().getString("table-file");
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileName(file_name);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+    else
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDIN_FILENO);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+
+    format_max_block_size = getClientConfiguration().getUInt64("format_max_block_size",
+        global_context->getSettingsRef().max_block_size);
+
+    /// Setting value from cmd arg overrides one from config
+    if (global_context->getSettingsRef().max_insert_block_size.changed)
+    {
+        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
+    }
+    else
+    {
+        insert_format_max_block_size = getClientConfiguration().getUInt64("insert_format_max_block_size",
+            global_context->getSettingsRef().max_insert_block_size);
+    }
+}
+
+
+
 void ClientCore::initTTYBuffer(ProgressOption progress)
 {
     if (tty_buf)

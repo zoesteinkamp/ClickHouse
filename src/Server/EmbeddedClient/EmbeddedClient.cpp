@@ -85,6 +85,12 @@ void EmbeddedClient::connect()
     }
 }
 
+Poco::Util::LayeredConfiguration & EmbeddedClient::getClientConfiguration()
+{
+    chassert(layered_configuration);
+    return *layered_configuration;
+}
+
 
 int EmbeddedClient::run(const NameToNameMap & envVars, const String & first_query)
 {

@@ -723,7 +723,6 @@ bool ClientCore::isRegularFile(int fd)
 }
 
 
-
 void ClientCore::initTTYBuffer(ProgressOption progress)
 {
     if (tty_buf)

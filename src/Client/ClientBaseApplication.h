@@ -10,7 +10,7 @@
 #include <Core/ExternalTable.h>
 #include <Poco/Util/Application.h>
 #include <Interpreters/Context.h>
-#include <Client/ClientCore.h>
+#include <Client/ClientBase.h>
 #include <Client/Suggest.h>
 #include <Client/QueryFuzzer.h>
 #include <boost/program_options.hpp>
@@ -31,7 +31,7 @@ void interruptSignalHandler(int signum);
 class InternalTextLogs;
 class WriteBufferFromFileDescriptor;
 
-class ClientBaseApplication : public ClientCore, public Poco::Util::Application, public IHints<2>
+class ClientBaseApplication : public ClientBase, public Poco::Util::Application, public IHints<2>
 {
 
 public:

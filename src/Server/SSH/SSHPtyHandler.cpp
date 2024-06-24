@@ -1,6 +1,6 @@
 #include <atomic>
 #include <stdexcept>
-#include <Server/EmbeddedClient/openpty.h>
+#include <Server/ClientEmbedded/openpty.h>
 #include <Common/clibssh.h>
 #include <Server/SSH/SSHPtyHandler.h>
 #include <boost/iostreams/device/file_descriptor.hpp>
@@ -12,9 +12,9 @@
 #include "Access/Credentials.h"
 #include "Access/SSH/SSHPublicKey.h"
 #include "Core/Names.h"
-#include "Server/EmbeddedClient/EmbeddedClientRunner.h"
-#include "Server/EmbeddedClient/IClientDescriptorSet.h"
-#include "Server/EmbeddedClient/PtyClientDescriptorSet.h"
+#include "Server/ClientEmbedded/ClientEmbeddedRunner.h"
+#include "Server/ClientEmbedded/IClientDescriptorSet.h"
+#include "Server/ClientEmbedded/PtyClientDescriptorSet.h"
 #include "Server/SSH/SSHChannel.h"
 #include "Server/SSH/SSHEvent.h"
 #include <Common/logger_useful.h>
@@ -90,7 +90,7 @@ public:
     ::ssh::SSHChannel channel;
     std::unique_ptr<Session> db_session;
     NameToNameMap env;
-    std::optional<EmbeddedClientRunner> client_runner;
+    std::optional<ClientEmbeddedRunner> client_runner;
     Poco::Logger * log;
 
 private:

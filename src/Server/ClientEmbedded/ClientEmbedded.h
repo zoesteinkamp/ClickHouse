@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Client/ClientCore.h>
+#include <Client/ClientBase.h>
 #include <Client/LocalConnection.h>
 
 #include <Core/Settings.h>
@@ -22,10 +22,10 @@ namespace DB
 {
 
 // Client class which can be run embedded into server
-class EmbeddedClient : public ClientCore
+class ClientEmbedded : public ClientBase
 {
 public:
-    explicit EmbeddedClient(
+    explicit ClientEmbedded(
         std::unique_ptr<Session> && session_,
         int in_fd_,
         int out_fd_,
@@ -33,7 +33,7 @@ public:
         std::istream & input_stream_,
         std::ostream & output_stream_,
         std::ostream & error_stream_)
-        : ClientCore(in_fd_, out_fd_, err_fd_, input_stream_, output_stream_, error_stream_), session(std::move(session_))
+        : ClientBase(in_fd_, out_fd_, err_fd_, input_stream_, output_stream_, error_stream_), session(std::move(session_))
     {
         global_context = session->makeSessionContext();
         configuration = ConfigHelper::createEmpty();
@@ -43,7 +43,7 @@ public:
 
     int run(const NameToNameMap & envVars, const String & first_query);
 
-    ~EmbeddedClient() override { cleanup(); }
+    ~ClientEmbedded() override { cleanup(); }
 
 protected:
     void connect() override;

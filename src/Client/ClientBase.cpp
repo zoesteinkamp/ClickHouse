@@ -1,4 +1,4 @@
-#include <Client/ClientCore.h>
+#include <Client/ClientBase.h>
 #include <Client/LineReader.h>
 #include <Client/ClientBaseHelpers.h>
 #include <Client/TestHint.h>
@@ -256,7 +256,7 @@ public:
     using Exception::Exception;
 };
 
-ClientCore::ClientCore(
+ClientBase::ClientBase(
     int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_)
     : std_in(in_fd_)
     , std_out(out_fd_)
@@ -274,13 +274,13 @@ ClientCore::ClientCore(
     terminal_width = getTerminalWidth(in_fd, err_fd);
 }
 
-ClientCore::~ClientCore() = default;
+ClientBase::~ClientBase() = default;
 
 
 // ClientBase::~ClientBase() = default;
 // ClientBase::ClientBase() = default;
 
-// void ClientCore::setupSignalHandler()
+// void ClientBase::setupSignalHandler()
 // {
 //     query_interrupt_handler.stop();
 
@@ -305,7 +305,7 @@ ClientCore::~ClientCore() = default;
 // }
 
 
-ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool argument_is_interactive, bool argument_ignore_error)
+ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool argument_is_interactive, bool argument_ignore_error)
 {
     std::unique_ptr<IParserBase> parser;
     ASTPtr res;
@@ -360,7 +360,7 @@ ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, const Setting
 
 
 /// Consumes trailing semicolons and tries to consume the same-line trailing comment.
-void ClientCore::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks)
+void ClientBase::adjustQueryEnd(const char *& this_query_end, const char * all_queries_end, uint32_t max_parser_depth, uint32_t max_parser_backtracks)
 {
     // We have to skip the trailing semicolon that might be left
     // after VALUES parsing or just after a normal semicolon-terminated query.
@@ -405,7 +405,7 @@ void ClientCore::adjustQueryEnd(const char *& this_query_end, const char * all_q
 
 
 /// Convert external tables to ExternalTableData and send them using the connection.
-void ClientCore::sendExternalTables(ASTPtr parsed_query)
+void ClientBase::sendExternalTables(ASTPtr parsed_query)
 {
     const auto * select = parsed_query->as<ASTSelectWithUnionQuery>();
     if (!select && !external_tables.empty())
@@ -419,7 +419,7 @@ void ClientCore::sendExternalTables(ASTPtr parsed_query)
 }
 
 
-void ClientCore::onData(Block & block, ASTPtr parsed_query)
+void ClientBase::onData(Block & block, ASTPtr parsed_query)
 {
     if (!block)
         return;
@@ -463,7 +463,7 @@ void ClientCore::onData(Block & block, ASTPtr parsed_query)
 }
 
 
-void ClientCore::onLogData(Block & block)
+void ClientBase::onLogData(Block & block)
 {
     initLogsOutputStream();
     if (need_render_progress && tty_buf)
@@ -473,21 +473,21 @@ void ClientCore::onLogData(Block & block)
 }
 
 
-void ClientCore::onTotals(Block & block, ASTPtr parsed_query)
+void ClientBase::onTotals(Block & block, ASTPtr parsed_query)
 {
     initOutputFormat(block, parsed_query);
     output_format->setTotals(materializeBlock(block));
 }
 
 
-void ClientCore::onExtremes(Block & block, ASTPtr parsed_query)
+void ClientBase::onExtremes(Block & block, ASTPtr parsed_query)
 {
     initOutputFormat(block, parsed_query);
     output_format->setExtremes(materializeBlock(block));
 }
 
 
-void ClientCore::onReceiveExceptionFromServer(std::unique_ptr<Exception> && e)
+void ClientBase::onReceiveExceptionFromServer(std::unique_ptr<Exception> && e)
 {
     have_error = true;
     server_exception = std::move(e);
@@ -495,14 +495,14 @@ void ClientCore::onReceiveExceptionFromServer(std::unique_ptr<Exception> && e)
 }
 
 
-void ClientCore::onProfileInfo(const ProfileInfo & profile_info)
+void ClientBase::onProfileInfo(const ProfileInfo & profile_info)
 {
     if (profile_info.hasAppliedLimit() && output_format)
         output_format->setRowsBeforeLimit(profile_info.getRowsBeforeLimit());
 }
 
 
-void ClientCore::initOutputFormat(const Block & block, ASTPtr parsed_query)
+void ClientBase::initOutputFormat(const Block & block, ASTPtr parsed_query)
 try
 {
     if (!output_format)
@@ -647,7 +647,7 @@ catch (...)
 }
 
 
-void ClientCore::initLogsOutputStream()
+void ClientBase::initLogsOutputStream()
 {
     if (!logs_out_stream)
     {
@@ -681,7 +681,7 @@ void ClientCore::initLogsOutputStream()
     }
 }
 
-void ClientCore::adjustSettings()
+void ClientBase::adjustSettings()
 {
     Settings settings = global_context->getSettings();
 
@@ -715,14 +715,14 @@ void ClientCore::adjustSettings()
 }
 
 
-bool ClientCore::isRegularFile(int fd)
+bool ClientBase::isRegularFile(int fd)
 {
     struct stat file_stat;
     return fstat(fd, &file_stat) == 0 && S_ISREG(file_stat.st_mode);
 }
 
 
-void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
+void ClientBase::setDefaultFormatsAndCompressionFromConfiguration()
 {
     if (getClientConfiguration().has("output-format"))
     {
@@ -802,7 +802,7 @@ void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
 }
 
 
-void ClientCore::initTTYBuffer(ProgressOption progress)
+void ClientBase::initTTYBuffer(ProgressOption progress)
 {
     if (tty_buf)
         return;
@@ -870,7 +870,7 @@ void ClientCore::initTTYBuffer(ProgressOption progress)
         need_render_progress = false;
 }
 
-void ClientCore::updateSuggest(const ASTPtr & ast)
+void ClientBase::updateSuggest(const ASTPtr & ast)
 {
     std::vector<std::string> new_words;
 
@@ -899,7 +899,7 @@ void ClientCore::updateSuggest(const ASTPtr & ast)
         suggest->addWords(std::move(new_words));
 }
 
-bool ClientCore::isSyncInsertWithData(const ASTInsertQuery & insert_query, const ContextPtr & context)
+bool ClientBase::isSyncInsertWithData(const ASTInsertQuery & insert_query, const ContextPtr & context)
 {
     if (!insert_query.data)
         return false;
@@ -911,7 +911,7 @@ bool ClientCore::isSyncInsertWithData(const ASTInsertQuery & insert_query, const
     return !settings.async_insert;
 }
 
-void ClientCore::processTextAsSingleQuery(const String & full_query)
+void ClientBase::processTextAsSingleQuery(const String & full_query)
 {
     /// Some parts of a query (result output and formatting) are executed
     /// client-side. Thus we need to parse the query.
@@ -963,7 +963,7 @@ void ClientCore::processTextAsSingleQuery(const String & full_query)
 }
 
 
-void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr parsed_query)
+void ClientBase::processOrdinaryQuery(const String & query_to_execute, ASTPtr parsed_query)
 {
     auto query = query_to_execute;
 
@@ -1110,7 +1110,7 @@ void ClientCore::processOrdinaryQuery(const String & query_to_execute, ASTPtr pa
 
 /// Receives and processes packets coming from server.
 /// Also checks if query execution should be cancelled.
-void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, bool partial_result_on_first_cancel)
+void ClientBase::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, bool partial_result_on_first_cancel)
 {
     // TODO: get the poll_interval from commandline.
     const auto receive_timeout = connection_parameters.timeouts.receive_timeout;
@@ -1193,7 +1193,7 @@ void ClientCore::receiveResult(ASTPtr parsed_query, Int32 signals_before_stop, b
 /// Receive a part of the result, or progress info or an exception and process it.
 /// Returns true if one should continue receiving packets.
 /// Output of result is suppressed if query was cancelled.
-bool ClientCore::receiveAndProcessPacket(ASTPtr parsed_query, bool cancelled_)
+bool ClientBase::receiveAndProcessPacket(ASTPtr parsed_query, bool cancelled_)
 {
     Packet packet = connection->receivePacket();
 
@@ -1252,7 +1252,7 @@ bool ClientCore::receiveAndProcessPacket(ASTPtr parsed_query, bool cancelled_)
 }
 
 
-void ClientCore::onProgress(const Progress & value)
+void ClientBase::onProgress(const Progress & value)
 {
     if (!progress_indication.updateProgress(value))
     {
@@ -1267,13 +1267,13 @@ void ClientCore::onProgress(const Progress & value)
         progress_indication.writeProgress(*tty_buf);
 }
 
-void ClientCore::onTimezoneUpdate(const String & tz)
+void ClientBase::onTimezoneUpdate(const String & tz)
 {
     global_context->setSetting("session_timezone", tz);
 }
 
 
-void ClientCore::onEndOfStream()
+void ClientBase::onEndOfStream()
 {
     if (need_render_progress && tty_buf)
         progress_indication.clearProgressOutput(*tty_buf);
@@ -1310,7 +1310,7 @@ void ClientCore::onEndOfStream()
 }
 
 
-void ClientCore::onProfileEvents(Block & block)
+void ClientBase::onProfileEvents(Block & block)
 {
     const auto rows = block.rows();
     if (rows == 0)
@@ -1383,7 +1383,7 @@ void ClientCore::onProfileEvents(Block & block)
 
 
 /// Flush all buffers.
-void ClientCore::resetOutput()
+void ClientBase::resetOutput()
 {
     /// Order is important: format, compression, file
 
@@ -1426,7 +1426,7 @@ void ClientCore::resetOutput()
 
 
 /// Receive the block that serves as an example of the structure of table where data will be inserted.
-bool ClientCore::receiveSampleBlock(Block & out, ColumnsDescription & columns_description, ASTPtr parsed_query)
+bool ClientBase::receiveSampleBlock(Block & out, ColumnsDescription & columns_description, ASTPtr parsed_query)
 {
     while (true)
     {
@@ -1463,7 +1463,7 @@ bool ClientCore::receiveSampleBlock(Block & out, ColumnsDescription & columns_de
 }
 
 
-void ClientCore::setInsertionTable(const ASTInsertQuery & insert_query)
+void ClientBase::setInsertionTable(const ASTInsertQuery & insert_query)
 {
     if (!global_context->hasInsertionTable() && insert_query.table)
     {
@@ -1477,7 +1477,7 @@ void ClientCore::setInsertionTable(const ASTInsertQuery & insert_query)
 }
 
 
-// void ClientCore::addMultiquery(std::string_view query, Arguments & common_arguments) const
+// void ClientBase::addMultiquery(std::string_view query, Arguments & common_arguments) const
 // {
 //     common_arguments.emplace_back("--multiquery");
 //     common_arguments.emplace_back("-q");
@@ -1502,7 +1502,7 @@ bool isStdinNotEmptyAndValid(ReadBufferFromFileDescriptor & std_in)
 }
 
 
-void ClientCore::processInsertQuery(const String & query_to_execute, ASTPtr parsed_query)
+void ClientBase::processInsertQuery(const String & query_to_execute, ASTPtr parsed_query)
 {
     auto query = query_to_execute;
     if (!query_parameters.empty()
@@ -1585,7 +1585,7 @@ void ClientCore::processInsertQuery(const String & query_to_execute, ASTPtr pars
 }
 
 
-void ClientCore::sendData(Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query)
+void ClientBase::sendData(Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query)
 {
     /// Get columns description from variable or (if it was empty) create it from sample.
     auto columns_description_for_query = columns_description.empty() ? ColumnsDescription(sample.getNamesAndTypesList()) : columns_description;
@@ -1726,7 +1726,7 @@ void ClientCore::sendData(Block & sample, const ColumnsDescription & columns_des
 }
 
 
-void ClientCore::sendDataFrom(ReadBuffer & buf, Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query, bool have_more_data)
+void ClientBase::sendDataFrom(ReadBuffer & buf, Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query, bool have_more_data)
 {
     String current_format = "Values";
 
@@ -1751,7 +1751,7 @@ void ClientCore::sendDataFrom(ReadBuffer & buf, Block & sample, const ColumnsDes
     sendDataFromPipe(std::move(pipe), parsed_query, have_more_data);
 }
 
-void ClientCore::sendDataFromPipe(Pipe&& pipe, ASTPtr parsed_query, bool have_more_data)
+void ClientBase::sendDataFromPipe(Pipe&& pipe, ASTPtr parsed_query, bool have_more_data)
 try
 {
     QueryPipeline pipeline(std::move(pipe));
@@ -1804,7 +1804,7 @@ catch (...)
     throw;
 }
 
-void ClientCore::sendDataFromStdin(Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query)
+void ClientBase::sendDataFromStdin(Block & sample, const ColumnsDescription & columns_description, ASTPtr parsed_query)
 {
     /// Send data read from stdin.
     try
@@ -1820,7 +1820,7 @@ void ClientCore::sendDataFromStdin(Block & sample, const ColumnsDescription & co
 
 
 /// Process Log packets, used when inserting data by blocks
-void ClientCore::receiveLogsAndProfileEvents(ASTPtr parsed_query)
+void ClientBase::receiveLogsAndProfileEvents(ASTPtr parsed_query)
 {
     auto packet_type = connection->checkPacket(0);
 
@@ -1835,7 +1835,7 @@ void ClientCore::receiveLogsAndProfileEvents(ASTPtr parsed_query)
 
 
 /// Process Log packets, exit when receive Exception or EndOfStream
-bool ClientCore::receiveEndOfQuery()
+bool ClientBase::receiveEndOfQuery()
 {
     while (true)
     {
@@ -1875,7 +1875,7 @@ bool ClientCore::receiveEndOfQuery()
     }
 }
 
-void ClientCore::cancelQuery()
+void ClientBase::cancelQuery()
 {
     connection->sendCancel();
     if (need_render_progress && tty_buf)
@@ -1887,7 +1887,7 @@ void ClientCore::cancelQuery()
     cancelled = true;
 }
 
-void ClientCore::processParsedSingleQuery(const String & full_query, const String & query_to_execute,
+void ClientBase::processParsedSingleQuery(const String & full_query, const String & query_to_execute,
         ASTPtr parsed_query, std::optional<bool> echo_query_, bool report_error)
 {
     resetOutput();
@@ -2086,7 +2086,7 @@ void ClientCore::processParsedSingleQuery(const String & full_query, const Strin
 }
 
 
-MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
+MultiQueryProcessingStage ClientBase::analyzeMultiQueryText(
     const char *& this_query_begin, const char *& this_query_end, const char * all_queries_end,
     String & query_to_execute, ASTPtr & parsed_query, const String & all_queries_text,
     std::unique_ptr<Exception> & current_exception)
@@ -2188,7 +2188,7 @@ MultiQueryProcessingStage ClientCore::analyzeMultiQueryText(
 }
 
 
-bool ClientCore::executeMultiQuery(const String & all_queries_text)
+bool ClientBase::executeMultiQuery(const String & all_queries_text)
 {
     bool echo_query = echo_queries;
 
@@ -2399,7 +2399,7 @@ bool ClientCore::executeMultiQuery(const String & all_queries_text)
 }
 
 
-bool ClientCore::processQueryText(const String & text)
+bool ClientBase::processQueryText(const String & text)
 {
     auto trimmed_input = trim(text, [](char c) { return isWhitespaceASCII(c) || c == ';'; });
 
@@ -2434,13 +2434,13 @@ bool ClientCore::processQueryText(const String & text)
 }
 
 
-String ClientCore::prompt() const
+String ClientBase::prompt() const
 {
     return prompt_by_server_display_name;
 }
 
 
-void ClientCore::initQueryIdFormats()
+void ClientBase::initQueryIdFormats()
 {
     if (!query_id_formats.empty())
         return;
@@ -2453,7 +2453,7 @@ void ClientCore::initQueryIdFormats()
 }
 
 
-bool ClientCore::addMergeTreeSettings(ASTCreateQuery & ast_create)
+bool ClientBase::addMergeTreeSettings(ASTCreateQuery & ast_create)
 {
     if (ast_create.attach
         || !ast_create.storage
@@ -2488,7 +2488,7 @@ bool ClientCore::addMergeTreeSettings(ASTCreateQuery & ast_create)
     return added_new_setting;
 }
 
-void ClientCore::runInteractive()
+void ClientBase::runInteractive()
 {
     if (!query_id.empty())
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "query_id could be specified only in non-interactive mode");
@@ -2694,7 +2694,7 @@ void ClientCore::runInteractive()
 }
 
 
-bool ClientCore::processMultiQueryFromFile(const String & file_name)
+bool ClientBase::processMultiQueryFromFile(const String & file_name)
 {
     String queries_from_file;
 
@@ -2713,7 +2713,7 @@ bool ClientCore::processMultiQueryFromFile(const String & file_name)
 }
 
 
-void ClientCore::runNonInteractive()
+void ClientBase::runNonInteractive()
 {
     if (delayed_interactive)
         initQueryIdFormats();
@@ -2766,9 +2766,9 @@ void ClientCore::runNonInteractive()
 
 #if defined(FUZZING_MODE)
 extern "C" int LLVMFuzzerRunDriver(int * argc, char *** argv, int (*callback)(const uint8_t * data, size_t size));
-ClientCore * app;
+ClientBase * app;
 
-void ClientCore::runLibFuzzer()
+void ClientBase::runLibFuzzer()
 {
     app = this;
     std::vector<String> fuzzer_args_holder;
@@ -2800,11 +2800,11 @@ void ClientCore::runLibFuzzer()
     });
 }
 #else
-void ClientCore::runLibFuzzer() {}
+void ClientBase::runLibFuzzer() {}
 #endif
 
 
-void ClientCore::clearTerminal()
+void ClientBase::clearTerminal()
 {
     /// Clear from cursor until end of screen.
     /// It is needed if garbage is left in terminal.
@@ -2814,7 +2814,7 @@ void ClientCore::clearTerminal()
 }
 
 
-void ClientCore::showClientVersion()
+void ClientBase::showClientVersion()
 {
     output_stream << VERSION_NAME << " " + getName() + " version " << VERSION_STRING << VERSION_OFFICIAL << "." << std::endl;
 }

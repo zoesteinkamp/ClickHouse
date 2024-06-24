@@ -1,6 +1,6 @@
 #pragma once
 
-#include <Server/EmbeddedClient/IClientDescriptorSet.h>
+#include <Server/ClientEmbedded/IClientDescriptorSet.h>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/stream.hpp>
 #include <Poco/Pipe.h>

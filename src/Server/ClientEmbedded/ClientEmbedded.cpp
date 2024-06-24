@@ -1,4 +1,4 @@
-#include "EmbeddedClient.h"
+#include "ClientEmbedded.h"
 
 #include <base/getFQDNOrHostName.h>
 #include <Interpreters/Session.h>
@@ -28,7 +28,7 @@ T getEnvOption(const NameToNameMap & envVars, const String & key, T defaultValue
 }
 
 
-void EmbeddedClient::processError(const String &) const
+void ClientEmbedded::processError(const String &) const
 {
     if (ignore_error)
         return;
@@ -57,7 +57,7 @@ void EmbeddedClient::processError(const String &) const
 }
 
 
-void EmbeddedClient::cleanup()
+void ClientEmbedded::cleanup()
 {
     try
     {
@@ -70,7 +70,7 @@ void EmbeddedClient::cleanup()
 }
 
 
-void EmbeddedClient::connect()
+void ClientEmbedded::connect()
 {
     if (!session)
     {
@@ -85,14 +85,14 @@ void EmbeddedClient::connect()
     }
 }
 
-Poco::Util::LayeredConfiguration & EmbeddedClient::getClientConfiguration()
+Poco::Util::LayeredConfiguration & ClientEmbedded::getClientConfiguration()
 {
     chassert(layered_configuration);
     return *layered_configuration;
 }
 
 
-int EmbeddedClient::run(const NameToNameMap & envVars, const String & first_query)
+int ClientEmbedded::run(const NameToNameMap & envVars, const String & first_query)
 {
 try
 {

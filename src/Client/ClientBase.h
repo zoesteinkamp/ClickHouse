@@ -64,15 +64,15 @@ class InternalTextLogs;
 class WriteBufferFromFileDescriptor;
 
 // Core client functionality. Can be used embedded into server and in standalone application.
-class ClientCore
+class ClientBase
 {
 
 public:
     using Arguments = std::vector<String>;
 
-    explicit ClientCore(
+    explicit ClientBase(
         int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_);
-    virtual ~ClientCore();
+    virtual ~ClientBase();
 
     bool tryStopQuery() { return query_interrupt_handler.tryStop(); }
     void stopQuery() { return query_interrupt_handler.stop(); }

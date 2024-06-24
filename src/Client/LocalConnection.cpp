@@ -1,6 +1,6 @@
 #include "LocalConnection.h"
 #include <memory>
-#include <Client/ClientCore.h>
+#include <Client/ClientBase.h>
 #include <Client/ClientBaseApplication.h>
 #include <Core/Protocol.h>
 #include <Interpreters/DatabaseCatalog.h>

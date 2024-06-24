@@ -1,10 +1,10 @@
 #pragma once
 
 #include <stdexcept>
-#include <Server/EmbeddedClient/EmbeddedClient.h>
-#include <Server/EmbeddedClient/IClientDescriptorSet.h>
-#include <Server/EmbeddedClient/PipeClientDescriptorSet.h>
-#include <Server/EmbeddedClient/PtyClientDescriptorSet.h>
+#include <Server/ClientEmbedded/ClientEmbedded.h>
+#include <Server/ClientEmbedded/IClientDescriptorSet.h>
+#include <Server/ClientEmbedded/PipeClientDescriptorSet.h>
+#include <Server/ClientEmbedded/PtyClientDescriptorSet.h>
 #include <Common/ThreadPool.h>
 
 
@@ -12,7 +12,7 @@ namespace DB
 {
 
 // Runs embedded client in dedicated thread, passes descriptors, checks its state
-class EmbeddedClientRunner
+class ClientEmbeddedRunner
 {
 public:
     bool hasStarted() { return started.test(); }
@@ -30,10 +30,10 @@ public:
     // Sets new window size for tty. Works only if IClientDescriptorSet is pty
     void changeWindowSize(int width, int height, int width_pixels, int height_pixels);
 
-    ~EmbeddedClientRunner();
+    ~ClientEmbeddedRunner();
 
-    explicit EmbeddedClientRunner(std::unique_ptr<IClientDescriptorSet> && client_descriptor_, std::unique_ptr<Session> && dbSession_)
-        : client_descriptors(std::move(client_descriptor_)), db_session(std::move(dbSession_)), log(&Poco::Logger::get("EmbeddedClientRunner"))
+    explicit ClientEmbeddedRunner(std::unique_ptr<IClientDescriptorSet> && client_descriptor_, std::unique_ptr<Session> && dbSession_)
+        : client_descriptors(std::move(client_descriptor_)), db_session(std::move(dbSession_)), log(&Poco::Logger::get("ClientEmbeddedRunner"))
     {
     }
 

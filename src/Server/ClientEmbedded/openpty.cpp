@@ -3,7 +3,7 @@
 #include <fcntl.h>
 #include <termios.h>
 #include <unistd.h>
-#include <Server/EmbeddedClient/openpty.h>
+#include <Server/ClientEmbedded/openpty.h>
 #include <sys/ioctl.h>
 #ifdef __FreeBSD__    // Not supported by FreeBSD version in sysroot https://www.gnu.org/software/gnulib/manual/html_node/ptsname_005fr.html
 #include <cstdio>

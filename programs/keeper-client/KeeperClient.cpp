@@ -1,7 +1,7 @@
 #include "KeeperClient.h"
 #include "Commands.h"
 #include <Client/ReplxxLineReader.h>
-#include <Client/ClientCore.h>
+#include <Client/ClientBase.h>
 #include <Common/VersionNumber.h>
 #include <Common/Config/ConfigProcessor.h>
 #include <Client/ClientBaseApplication.h>

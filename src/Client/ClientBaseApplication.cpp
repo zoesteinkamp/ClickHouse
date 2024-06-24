@@ -137,7 +137,7 @@ void ClientBaseApplication::initUserProvidedQueryIdFormats()
 
 ClientBaseApplication::~ClientBaseApplication() = default;
 
-ClientBaseApplication::ClientBaseApplication() : ClientCore(STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO, std::cin, std::cout, std::cerr) {}
+ClientBaseApplication::ClientBaseApplication() : ClientBase(STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO, std::cin, std::cout, std::cerr) {}
 
 
 void ClientBaseApplication::setupSignalHandler()

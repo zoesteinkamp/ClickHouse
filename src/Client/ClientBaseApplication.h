@@ -45,29 +45,14 @@ public:
     ClientBaseApplication();
     ~ClientBaseApplication() override;
 
+    void setDefaultFormatsAndCompressionFromConfiguration();
+
     void init(int argc, char ** argv);
 
     std::vector<String> getAllRegisteredNames() const override { return cmd_options; }
 
 protected:
     static void setupSignalHandler();
-    using ProgramOptionsDescription = boost::program_options::options_description;
-    using CommandLineOptions = boost::program_options::variables_map;
-
-    struct OptionsDescription
-    {
-        std::optional<ProgramOptionsDescription> main_description;
-        std::optional<ProgramOptionsDescription> external_description;
-        std::optional<ProgramOptionsDescription> hosts_and_ports_description;
-    };
-
-    virtual void printHelpMessage(const OptionsDescription & options_description) = 0;
-    virtual void addOptions(OptionsDescription & options_description) = 0;
-    virtual void processOptions(const OptionsDescription & options_description,
-                                const CommandLineOptions & options,
-                                const std::vector<Arguments> & external_tables_arguments,
-                                const std::vector<Arguments> & hosts_and_ports_arguments) = 0;
-    virtual void processConfig() = 0;
 
     virtual void readArguments(
         int argc,

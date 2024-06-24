@@ -1,7 +1,7 @@
 #include "SSHEvent.h"
 #include <stdexcept>
 #include <Common/Exception.h>
-#include <Common/SSH/clibssh.h>
+#include <Common/clibssh.h>
 
 namespace DB
 {

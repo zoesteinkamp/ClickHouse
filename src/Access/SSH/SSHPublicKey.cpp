@@ -1,7 +1,7 @@
 #include <stdexcept>
 #include <Access/SSH/SSHPublicKey.h>
 #include <Common/Exception.h>
-#include <Common/SSH/clibssh.h>
+#include <Common/clibssh.h>
 
 namespace DB
 {

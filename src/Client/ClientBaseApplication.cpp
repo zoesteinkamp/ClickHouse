@@ -21,8 +21,8 @@
 #include <Common/UTF8Helpers.h>
 #include <Common/TerminalSize.h>
 #include <Common/clearPasswordFromCommandLine.h>
-#include <Common/StringUtils/StringUtils.h>
 #include <Common/filesystemHelpers.h>
+#include <Common/tryGetFileNameByFileDescriptor.h>
 #include <Common/NetException.h>
 #include <Columns/ColumnString.h>
 #include <Columns/ColumnsNumber.h>
@@ -311,6 +311,86 @@ void ClientBaseApplication::addMultiquery(std::string_view query, Arguments & co
 }
 
 
+void ClientBaseApplication::setDefaultFormatsAndCompressionFromConfiguration()
+{
+    if (config().has("output-format"))
+    {
+        default_output_format = config().getString("output-format");
+        is_default_format = false;
+    }
+    else if (config().has("format"))
+    {
+        default_output_format = config().getString("format");
+        is_default_format = false;
+    }
+    else if (config().has("vertical"))
+    {
+        default_output_format = "Vertical";
+        is_default_format = false;
+    }
+    else if (isRegularFile(STDOUT_FILENO))
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDOUT_FILENO);
+        if (format_from_file_name)
+            default_output_format = *format_from_file_name;
+        else
+            default_output_format = "TSV";
+
+        std::optional<String> file_name = tryGetFileNameFromFileDescriptor(STDOUT_FILENO);
+        if (file_name)
+            default_output_compression_method = chooseCompressionMethod(*file_name, "");
+    }
+    else if (is_interactive)
+    {
+        default_output_format = "PrettyCompact";
+    }
+    else
+    {
+        default_output_format = "TSV";
+    }
+
+    if (config().has("input-format"))
+    {
+        default_input_format = config().getString("input-format");
+    }
+    else if (config().has("format"))
+    {
+        default_input_format = config().getString("format");
+    }
+    else if (config().getString("table-file", "-") != "-")
+    {
+        auto file_name = config().getString("table-file");
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileName(file_name);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+    else
+    {
+        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDIN_FILENO);
+        if (format_from_file_name)
+            default_input_format = *format_from_file_name;
+        else
+            default_input_format = "TSV";
+    }
+
+    format_max_block_size = config().getUInt64("format_max_block_size",
+        global_context->getSettingsRef().max_block_size);
+
+    /// Setting value from cmd arg overrides one from config
+    if (global_context->getSettingsRef().max_insert_block_size.changed)
+    {
+        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
+    }
+    else
+    {
+        insert_format_max_block_size = config().getUInt64("insert_format_max_block_size",
+            global_context->getSettingsRef().max_insert_block_size);
+    }
+}
+
+
 void ClientBaseApplication::init(int argc, char ** argv)
 {
     namespace po = boost::program_options;
@@ -435,7 +515,7 @@ void ClientBaseApplication::init(int argc, char ** argv)
     if (options.count("help")
         || (options.count("host") && options["host"].as<std::string>() == "elp")) /// If user writes -help instead of --help.
     {
-        printHelpMessage(options_description);
+        printHelpMessage(options_description, false);
         exit(0); // NOLINT(concurrency-mt-unsafe)
     }
 
@@ -515,7 +595,7 @@ void ClientBaseApplication::init(int argc, char ** argv)
     profile_events.print = options.count("print-profile-events");
     profile_events.delay_ms = options["profile-events-delay-ms"].as<UInt64>();
 
-    processOptions(options_description, options, external_tables_arguments, hosts_and_ports_arguments);
+    this->processOptions(options_description, options, external_tables_arguments, hosts_and_ports_arguments);
     {
         std::unordered_set<std::string> alias_names;
         alias_names.reserve(options_description.main_description->options().size());

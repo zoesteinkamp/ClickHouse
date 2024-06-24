@@ -123,8 +123,8 @@
 #    include <Poco/Net/SecureServerSocket.h>
 #    include <Server/CertificateReloader.h>
 #    include <Server/SSH/SSHPtyHandlerFactory.h>
-#    include <Common/SSH/LibSSHInitializer.h>
-#    include <Common/SSH/LibSSHLogger.h>
+#    include <Common/LibSSHInitializer.h>
+#    include <Common/LibSSHLogger.h>
 #endif
 
 #if USE_GRPC

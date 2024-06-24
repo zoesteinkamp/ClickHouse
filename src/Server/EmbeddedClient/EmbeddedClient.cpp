@@ -121,7 +121,8 @@ try
     default_database = getEnvOption<String>(envVars, "database", "");
 
     format = getEnvOption<String>(envVars, "output-format", getEnvOption<String>(envVars, "format", is_interactive ? "PrettyCompact" : "TSV"));
-    insert_format = "Values";
+    // TODO: Fix
+    // insert_format = "Values";
     insert_format_max_block_size = getEnvOption<size_t>(envVars, "insert_format_max_block_size",
         global_context->getSettingsRef().max_insert_block_size);
 

@@ -1,7 +1,7 @@
 #include <atomic>
 #include <stdexcept>
 #include <Server/EmbeddedClient/openpty.h>
-#include <Common/SSH/clibssh.h>
+#include <Common/clibssh.h>
 #include <Server/SSH/SSHPtyHandler.h>
 #include <boost/iostreams/device/file_descriptor.hpp>
 #include <boost/iostreams/stream.hpp>
@@ -394,7 +394,7 @@ private:
 
             // The signature is checked, so just verify that user is associated with publickey.
             // Function will throw if authentication fails.
-            db_session_created->authenticate(SshCredentials{user_name, ssh::SSHKey(key).signString(challenge), challenge}, peer_address);
+            db_session_created->authenticate(SshCredentials{user_name, SSHKey(key).signString(challenge), challenge}, peer_address);
 
 
             authenticated = true;

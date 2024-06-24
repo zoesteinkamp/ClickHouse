@@ -1,6 +1,7 @@
 #include "LocalConnection.h"
 #include <memory>
-#include <Client/ClientBase.h>
+#include <Client/ClientCore.h>
+#include <Client/ClientBaseApplication.h>
 #include <Core/Protocol.h>
 #include <Interpreters/DatabaseCatalog.h>
 #include <Interpreters/executeQuery.h>
@@ -162,7 +163,8 @@ void LocalConnection::sendQuery(
 
         String current_format = "Values";
         const char * begin = state->query.data();
-        auto parsed_query = ClientBase::parseQuery(begin, begin + state->query.size(),
+
+        auto parsed_query = ClientBaseApplication::getInstance().parseQuery(begin, begin + state->query.size(),
             context->getSettingsRef(),
             /*allow_multi_statements=*/ false,
             /*is_interactive=*/ false,

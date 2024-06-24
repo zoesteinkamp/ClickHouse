@@ -6,7 +6,7 @@
 #include "Common/Exception.h"
 #include <Common/logger_useful.h>
 #include "Server/IServer.h"
-#include "Common/SSH/LibSSHLogger.h"
+#include "Common/LibSSHLogger.h"
 #include "Server/SSH/SSHBind.h"
 #include "Server/SSH/SSHSession.h"
 

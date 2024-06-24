@@ -306,7 +306,7 @@ ClientCore::~ClientCore() = default;
 // }
 
 
-ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool is_interactive, bool ignore_error)
+ASTPtr ClientCore::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool argument_is_interactive, bool argument_ignore_error)
 {
     std::unique_ptr<IParserBase> parser;
     ASTPtr res;
@@ -325,7 +325,7 @@ ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Setting
     else
         parser = std::make_unique<ParserQuery>(end, settings.allow_settings_after_format_in_insert);
 
-    if (is_interactive || ignore_error)
+    if (argument_is_interactive || argument_ignore_error)
     {
         String message;
         if (dialect == Dialect::kusto)
@@ -347,7 +347,7 @@ ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Setting
             res = parseQueryAndMovePosition(*parser, pos, end, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks);
     }
 
-    if (is_interactive)
+    if (argument_is_interactive)
     {
         output_stream << std::endl;
         WriteBufferFromOStream res_buf(output_stream, 4096);
@@ -722,84 +722,7 @@ bool ClientCore::isRegularFile(int fd)
     return fstat(fd, &file_stat) == 0 && S_ISREG(file_stat.st_mode);
 }
 
-void ClientCore::setDefaultFormatsAndCompressionFromConfiguration()
-{
-    if (config().has("output-format"))
-    {
-        default_output_format = config().getString("output-format");
-        is_default_format = false;
-    }
-    else if (config().has("format"))
-    {
-        default_output_format = config().getString("format");
-        is_default_format = false;
-    }
-    else if (config().has("vertical"))
-    {
-        default_output_format = "Vertical";
-        is_default_format = false;
-    }
-    else if (isRegularFile(STDOUT_FILENO))
-    {
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDOUT_FILENO);
-        if (format_from_file_name)
-            default_output_format = *format_from_file_name;
-        else
-            default_output_format = "TSV";
 
-        std::optional<String> file_name = tryGetFileNameFromFileDescriptor(STDOUT_FILENO);
-        if (file_name)
-            default_output_compression_method = chooseCompressionMethod(*file_name, "");
-    }
-    else if (is_interactive)
-    {
-        default_output_format = "PrettyCompact";
-    }
-    else
-    {
-        default_output_format = "TSV";
-    }
-
-    if (config().has("input-format"))
-    {
-        default_input_format = config().getString("input-format");
-    }
-    else if (config().has("format"))
-    {
-        default_input_format = config().getString("format");
-    }
-    else if (config().getString("table-file", "-") != "-")
-    {
-        auto file_name = config().getString("table-file");
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileName(file_name);
-        if (format_from_file_name)
-            default_input_format = *format_from_file_name;
-        else
-            default_input_format = "TSV";
-    }
-    else
-    {
-        std::optional<String> format_from_file_name = FormatFactory::instance().tryGetFormatFromFileDescriptor(STDIN_FILENO);
-        if (format_from_file_name)
-            default_input_format = *format_from_file_name;
-        else
-            default_input_format = "TSV";
-    }
-
-    format_max_block_size = config().getUInt64("format_max_block_size",
-        global_context->getSettingsRef().max_block_size);
-
-    /// Setting value from cmd arg overrides one from config
-    if (global_context->getSettingsRef().max_insert_block_size.changed)
-    {
-        insert_format_max_block_size = global_context->getSettingsRef().max_insert_block_size;
-    }
-    else
-    {
-        insert_format_max_block_size = config().getUInt64("insert_format_max_block_size",
-            global_context->getSettingsRef().max_insert_block_size);
-    }
-}
 
 void ClientCore::initTTYBuffer(ProgressOption progress)
 {
@@ -2516,17 +2439,18 @@ void ClientCore::runInteractive()
             home_path = home_path_cstr;
     }
 
-    /// Load command history if present.
-    if (config().has("history_file"))
-        history_file = config().getString("history_file");
-    else
-    {
-        auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
-        if (history_file_from_env)
-            history_file = history_file_from_env;
-        else if (!home_path.empty())
-            history_file = home_path + "/.clickhouse-client-history";
-    }
+    // FIXME.
+    // /// Load command history if present.
+    // if (config().has("history_file"))
+    //     history_file = config().getString("history_file");
+    // else
+    // {
+    //     auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
+    //     if (history_file_from_env)
+    //         history_file = history_file_from_env;
+    //     else if (!home_path.empty())
+    //         history_file = home_path + "/.clickhouse-client-history";
+    // }
 
     if (!history_file.empty() && !fs::exists(history_file))
     {

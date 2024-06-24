@@ -77,8 +77,7 @@ public:
     bool tryStopQuery() { return query_interrupt_handler.tryStop(); }
     void stopQuery() { return query_interrupt_handler.stop(); }
 
-    std::vector<String> getAllRegisteredNames() const override { return cmd_options; }
-    static ASTPtr parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool is_interactive, bool ignore_error);
+    ASTPtr parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool is_interactive, bool ignore_error);
 
 protected:
     void runInteractive();
@@ -118,16 +117,25 @@ protected:
     void clearTerminal();
     void showClientVersion();
 
+    using ProgramOptionsDescription = boost::program_options::options_description;
+    using CommandLineOptions = boost::program_options::variables_map;
+
+    struct OptionsDescription
+    {
+        std::optional<ProgramOptionsDescription> main_description;
+        std::optional<ProgramOptionsDescription> external_description;
+        std::optional<ProgramOptionsDescription> hosts_and_ports_description;
+    };
 
     virtual void updateLoggerLevel(const String &) {}
 
-    virtual void printHelpMessage(const OptionsDescription & options_description, bool verbose) = 0;
-    virtual void addOptions(OptionsDescription & options_description) = 0;
-    virtual void processOptions(const OptionsDescription & options_description,
-                                const CommandLineOptions & options,
-                                const std::vector<Arguments> & external_tables_arguments,
-                                const std::vector<Arguments> & hosts_and_ports_arguments) = 0;
-    virtual void processConfig() = 0;
+    virtual void printHelpMessage([[maybe_unused]] const OptionsDescription & options_description, [[maybe_unused]] bool verbose) {}
+    virtual void addOptions([[maybe_unused]] OptionsDescription & options_description) {}
+    virtual void processOptions([[maybe_unused]] const OptionsDescription & options_description,
+                                [[maybe_unused]] const CommandLineOptions & options,
+                                [[maybe_unused]] const std::vector<Arguments> & external_tables_arguments,
+                                [[maybe_unused]] const std::vector<Arguments> & hosts_and_ports_arguments) {}
+    virtual void processConfig() {}
 
     bool processQueryText(const String & text);
 
@@ -205,8 +213,6 @@ protected:
     /// Adjust some settings after command line options and config had been processed.
     void adjustSettings();
 
-    void setDefaultFormatsAndCompressionFromConfiguration();
-
     void initTTYBuffer(ProgressOption progress);
 
     /// Should be one of the first, to be destroyed the last,
@@ -276,7 +282,6 @@ protected:
     ReadBufferFromFileDescriptor std_in;
     /// Console output.
     WriteBufferFromFileDescriptor std_out;
-    String pager;
     std::unique_ptr<ShellCommand> pager_cmd;
 
     /// The user can specify to redirect query output to a file.

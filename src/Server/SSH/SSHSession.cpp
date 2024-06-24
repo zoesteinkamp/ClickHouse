@@ -2,7 +2,7 @@
 #include <stdexcept>
 #include <fmt/format.h>
 #include <Common/Exception.h>
-#include <Common/SSH/clibssh.h>
+#include <Common/clibssh.h>
 
 namespace DB
 {

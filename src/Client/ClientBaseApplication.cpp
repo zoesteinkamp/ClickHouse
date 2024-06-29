@@ -433,7 +433,7 @@ void ClientBaseApplication::init(int argc, char ** argv)
 
     /// Common options for clickhouse-client and clickhouse-local.
     if (options.count("time"))
-        print_time_to_stderr = true;
+        getClientConfiguration().setBool("print-time-to-stderr", true);
     if (options.count("query"))
         getClientConfiguration().setString("query", options["query"].as<std::string>());
     if (options.count("query_id"))
@@ -460,8 +460,9 @@ void ClientBaseApplication::init(int argc, char ** argv)
         getClientConfiguration().setBool("print-profile-events", true);
     if (options.count("profile-events-delay-ms"))
         getClientConfiguration().setUInt64("profile-events-delay-ms", options["profile-events-delay-ms"].as<UInt64>());
+    /// Whether to print the number of processed rows at
     if (options.count("processed-rows"))
-        print_num_processed_rows = true;
+        getClientConfiguration().setBool("print-num-processed-rows", true);
     if (options.count("progress"))
     {
         switch (options["progress"].as<ProgressOption>())

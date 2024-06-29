@@ -230,6 +230,8 @@ protected:
 
     void initTTYBuffer(ProgressOption progress);
 
+    void parseAndCheckOptions(OptionsDescription & options_description, po::variables_map & options, Arguments & arguments);
+
     /// Should be one of the first, to be destroyed the last,
     /// since other members can use them.
     SharedContextHolder shared_context; // maybe not initialized

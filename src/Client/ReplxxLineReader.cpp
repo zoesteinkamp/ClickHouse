@@ -302,7 +302,8 @@ ReplxxLineReader::ReplxxLineReader(
     std::ostream & output_stream_,
     int in_fd_,
     int out_fd_,
-    int err_fd_)
+    int err_fd_
+)
     : LineReader(history_file_path_, multiline_, std::move(extenders_), std::move(delimiters_), input_stream_, output_stream_, in_fd_)
     , rx(input_stream_, output_stream_, in_fd_, out_fd_, err_fd_)
     , highlighter(std::move(highlighter_))

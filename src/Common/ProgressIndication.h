@@ -1,7 +1,6 @@
 #pragma once
 
 #include <unordered_map>
-#include <unordered_set>
 #include <mutex>
 #include <unistd.h>
 #include <IO/Progress.h>
@@ -33,8 +32,16 @@ using HostToTimesMap = std::unordered_map<String, ThreadEventData>;
 class ProgressIndication
 {
 public:
-    explicit ProgressIndication(std::ostream & output_stream_ = std::cout, int in_fd_ = STDIN_FILENO, int err_fd_ = STDERR_FILENO)
-        : output_stream(output_stream_), in_fd(in_fd_), err_fd(err_fd_)
+
+    explicit ProgressIndication
+    (
+        std::ostream & output_stream_ = std::cout,
+        int in_fd_ = STDIN_FILENO,
+        int err_fd_ = STDERR_FILENO
+    )
+        : output_stream(output_stream_),
+        in_fd(in_fd_),
+        err_fd(err_fd_)
     {
     }
 

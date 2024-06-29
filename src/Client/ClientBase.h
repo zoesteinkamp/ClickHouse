@@ -22,6 +22,7 @@
 #include <Storages/SelectQueryInfo.h>
 #include <Storages/MergeTree/MergeTreeSettings.h>
 
+namespace po = boost::program_options;
 
 namespace DB
 {
@@ -70,14 +71,23 @@ class ClientBase
 public:
     using Arguments = std::vector<String>;
 
-    explicit ClientBase(
-        int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_);
+    explicit ClientBase
+    (
+        int in_fd_ = STDIN_FILENO,
+        int out_fd_ = STDOUT_FILENO,
+        int err_fd_ = STDERR_FILENO,
+        std::istream & input_stream_ = std::cin,
+        std::ostream & output_stream_ = std::cout,
+        std::ostream & error_stream_ = std::cerr
+    );
+
     virtual ~ClientBase();
 
     bool tryStopQuery() { return query_interrupt_handler.tryStop(); }
     void stopQuery() { return query_interrupt_handler.stop(); }
 
-    ASTPtr parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool is_interactive, bool ignore_error);
+    // std::vector<String> getAllRegisteredNames() const override { return cmd_options; }
+    ASTPtr parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements);
 
 protected:
     void runInteractive();
@@ -140,6 +150,7 @@ protected:
                                 [[maybe_unused]] const std::vector<Arguments> & hosts_and_ports_arguments) {}
     virtual void processConfig() {}
 
+    /// Returns true if query processing was successful.
     bool processQueryText(const String & text);
 
     void setInsertionTable(const ASTInsertQuery & insert_query);
@@ -180,7 +191,6 @@ private:
     void updateSuggest(const ASTPtr & ast);
 
     void initQueryIdFormats();
-    virtual void initUserProvidedQueryIdFormats() {}
     bool addMergeTreeSettings(ASTCreateQuery & ast_create);
 
 protected:
@@ -238,7 +248,6 @@ protected:
 
     bool echo_queries = false; /// Print queries before execution in batch mode.
     bool ignore_error = false; /// In case of errors, don't print error message, continue to next query. Only applicable for non-interactive mode.
-    bool print_time_to_stderr = false; /// Output execution time to stderr in batch mode.
 
     std::optional<Suggest> suggest;
     bool load_suggestions = false;
@@ -318,7 +327,6 @@ protected:
     bool need_render_profile_events = true;
     bool written_first_block = false;
     size_t processed_rows = 0; /// How many rows have been read or written.
-    bool print_num_processed_rows = false; /// Whether to print the number of processed rows at
 
     bool print_stack_trace = false;
     /// The last exception that was received from the server. Is used for the
@@ -371,12 +379,13 @@ protected:
 
     bool logging_initialized = false;
 
-    std::ostream & output_stream;
-    std::ostream & error_stream;
-    std::istream & input_stream;
+    /// Unpacked descriptors and streams for the ease of use.
     int in_fd = STDIN_FILENO;
     int out_fd = STDOUT_FILENO;
     int err_fd = STDERR_FILENO;
+    std::istream & input_stream;
+    std::ostream & output_stream;
+    std::ostream & error_stream;
 };
 
 }

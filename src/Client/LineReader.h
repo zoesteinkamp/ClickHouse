@@ -48,6 +48,7 @@ public:
         std::ostream & output_stream_ = std::cout,
         int in_fd_ = STDIN_FILENO
     );
+
     virtual ~LineReader() = default;
 
     /// Reads the whole line until delimiter (in multiline mode) or until the last line without extender.

@@ -106,6 +106,7 @@ namespace ErrorCodes
     extern const int USER_SESSION_LIMIT_EXCEEDED;
     extern const int NOT_IMPLEMENTED;
     extern const int CANNOT_READ_FROM_FILE_DESCRIPTOR;
+    extern const int USER_EXPIRED;
 }
 
 ProgressOption toProgressOption(std::string progress)
@@ -256,17 +257,24 @@ public:
     using Exception::Exception;
 };
 
+ClientBase::~ClientBase() = default;
 ClientBase::ClientBase(
-    int in_fd_, int out_fd_, int err_fd_, std::istream & input_stream_, std::ostream & output_stream_, std::ostream & error_stream_)
+    int in_fd_,
+    int out_fd_,
+    int err_fd_,
+    std::istream & input_stream_,
+    std::ostream & output_stream_,
+    std::ostream & error_stream_
+)
     : std_in(in_fd_)
     , std_out(out_fd_)
     , progress_indication(output_stream_, in_fd_, err_fd_)
-    , output_stream(output_stream_)
-    , error_stream(error_stream_)
-    , input_stream(input_stream_)
     , in_fd(in_fd_)
     , out_fd(out_fd_)
     , err_fd(err_fd_)
+    , input_stream(input_stream_)
+    , output_stream(output_stream_)
+    , error_stream(error_stream_)
 {
     stdin_is_a_tty = isatty(in_fd);
     stdout_is_a_tty = isatty(out_fd);
@@ -274,38 +282,7 @@ ClientBase::ClientBase(
     terminal_width = getTerminalWidth(in_fd, err_fd);
 }
 
-ClientBase::~ClientBase() = default;
-
-
-// ClientBase::~ClientBase() = default;
-// ClientBase::ClientBase() = default;
-
-// void ClientBase::setupSignalHandler()
-// {
-//     query_interrupt_handler.stop();
-
-//     struct sigaction new_act;
-//     memset(&new_act, 0, sizeof(new_act));
-
-//     new_act.sa_handler = interruptSignalHandler;
-//     new_act.sa_flags = 0;
-
-// #if defined(OS_DARWIN)
-//     sigemptyset(&new_act.sa_mask);
-// #else
-//     if (sigemptyset(&new_act.sa_mask))
-//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
-// #endif
-
-//     if (sigaction(SIGINT, &new_act, nullptr))
-//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
-
-//     if (sigaction(SIGQUIT, &new_act, nullptr))
-//         throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler");
-// }
-
-
-ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements, bool argument_is_interactive, bool argument_ignore_error)
+ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Settings & settings, bool allow_multi_statements)
 {
     std::unique_ptr<IParserBase> parser;
     ASTPtr res;
@@ -324,7 +301,7 @@ ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Setting
     else
         parser = std::make_unique<ParserQuery>(end, settings.allow_settings_after_format_in_insert);
 
-    if (argument_is_interactive || argument_ignore_error)
+    if (is_interactive || ignore_error)
     {
         String message;
         if (dialect == Dialect::kusto)
@@ -346,7 +323,7 @@ ASTPtr ClientBase::parseQuery(const char *& pos, const char * end, const Setting
             res = parseQueryAndMovePosition(*parser, pos, end, "", allow_multi_statements, max_length, settings.max_parser_depth, settings.max_parser_backtracks);
     }
 
-    if (argument_is_interactive)
+    if (is_interactive)
     {
         output_stream << std::endl;
         WriteBufferFromOStream res_buf(output_stream, 4096);
@@ -918,9 +895,7 @@ void ClientBase::processTextAsSingleQuery(const String & full_query)
     const char * begin = full_query.data();
     auto parsed_query = parseQuery(begin, begin + full_query.size(),
         global_context->getSettingsRef(),
-        /*allow_multi_statements=*/ false,
-        is_interactive,
-        ignore_error);
+        /*allow_multi_statements=*/ false);
 
     if (!parsed_query)
         return;
@@ -2045,7 +2020,9 @@ void ClientBase::processParsedSingleQuery(const String & full_query, const Strin
         {
             const String & new_database = use_query->getDatabase();
             /// If the client initiates the reconnection, it takes the settings from the config.
+            /// TODO: Revisit
             default_database = new_database;
+            getClientConfiguration().setString("database", new_database);
             /// If the connection initiates the reconnection, it uses its variable.
             connection->setDefaultDatabase(new_database);
         }
@@ -2065,18 +2042,19 @@ void ClientBase::processParsedSingleQuery(const String & full_query, const Strin
 
     if (is_interactive)
     {
-        output_stream << std::endl
-            << processed_rows << " row" << (processed_rows == 1 ? "" : "s")
-            << " in set. Elapsed: " << progress_indication.elapsedSeconds() << " sec. ";
+        output_stream << std::endl;
+        if (!server_exception || processed_rows != 0)
+            output_stream << processed_rows << " row" << (processed_rows == 1 ? "" : "s") << " in set. ";
+        output_stream << "Elapsed: " << progress_indication.elapsedSeconds() << " sec. ";
         progress_indication.writeFinalProgress();
         output_stream << std::endl << std::endl;
     }
-    else if (print_time_to_stderr)
+    else if (getClientConfiguration().getBool("print-time-to-stderr", false))
     {
         error_stream << progress_indication.elapsedSeconds() << "\n";
     }
 
-    if (!is_interactive && print_num_processed_rows)
+    if (!is_interactive && getClientConfiguration().getBool("print-num-processed-rows", false))
     {
         output_stream << "Processed rows: " << processed_rows << "\n";
     }
@@ -2128,9 +2106,7 @@ MultiQueryProcessingStage ClientBase::analyzeMultiQueryText(
     {
         parsed_query = parseQuery(this_query_end, all_queries_end,
             global_context->getSettingsRef(),
-            /*allow_multi_statements=*/ true,
-            is_interactive,
-            ignore_error);
+            /*allow_multi_statements=*/ true);
     }
     catch (const Exception & e)
     {
@@ -2289,7 +2265,7 @@ bool ClientBase::executeMultiQuery(const String & all_queries_text)
                 catch (...)
                 {
                     // Surprisingly, this is a client error. A server error would
-                    // have been reported without throwing (see onReceiveSeverException()).
+                    // have been reported without throwing (see onReceiveExceptionFromServer()).
                     client_exception = std::make_unique<Exception>(getCurrentExceptionMessageAndPattern(print_stack_trace), getCurrentExceptionCode());
                     have_error = true;
                 }
@@ -2446,7 +2422,13 @@ void ClientBase::initQueryIdFormats()
         return;
 
     /// Initialize query_id_formats if any
-    initUserProvidedQueryIdFormats();
+    if (getClientConfiguration().has("query_id_formats"))
+    {
+        Poco::Util::AbstractConfiguration::Keys keys;
+        getClientConfiguration().keys("query_id_formats", keys);
+        for (const auto & name : keys)
+            query_id_formats.emplace_back(name + ":", getClientConfiguration().getString("query_id_formats." + name));
+    }
 
     if (query_id_formats.empty())
         query_id_formats.emplace_back("Query id:", " {query_id}\n");
@@ -2490,9 +2472,9 @@ bool ClientBase::addMergeTreeSettings(ASTCreateQuery & ast_create)
 
 void ClientBase::runInteractive()
 {
-    if (!query_id.empty())
+    if (getClientConfiguration().has("query_id"))
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "query_id could be specified only in non-interactive mode");
-    if (print_time_to_stderr)
+    if (getClientConfiguration().getBool("print-time-to-stderr", false))
         throw Exception(ErrorCodes::BAD_ARGUMENTS, "time option could be specified only in non-interactive mode");
 
     initQueryIdFormats();
@@ -2505,9 +2487,9 @@ void ClientBase::runInteractive()
     {
         /// Load suggestion data from the server.
         if (global_context->getApplicationType() == Context::ApplicationType::CLIENT)
-            suggest->load<Connection>(global_context, connection_parameters, suggestion_limit, wait_for_suggestions_to_load);
+            suggest->load<Connection>(global_context, connection_parameters, getClientConfiguration().getInt("suggestion_limit"), wait_for_suggestions_to_load);
         else if (global_context->getApplicationType() == Context::ApplicationType::LOCAL)
-            suggest->load<LocalConnection>(global_context, connection_parameters, suggestion_limit, wait_for_suggestions_to_load);
+            suggest->load<LocalConnection>(global_context, connection_parameters, getClientConfiguration().getInt("suggestion_limit"), wait_for_suggestions_to_load);
     }
 
     if (home_path.empty())
@@ -2517,18 +2499,17 @@ void ClientBase::runInteractive()
             home_path = home_path_cstr;
     }
 
-    // FIXME.
-    // /// Load command history if present.
-    // if (config().has("history_file"))
-    //     history_file = config().getString("history_file");
-    // else
-    // {
-    //     auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
-    //     if (history_file_from_env)
-    //         history_file = history_file_from_env;
-    //     else if (!home_path.empty())
-    //         history_file = home_path + "/.clickhouse-client-history";
-    // }
+    /// Load command history if present.
+    if (getClientConfiguration().has("history_file"))
+        history_file = getClientConfiguration().getString("history_file");
+    else
+    {
+        auto * history_file_from_env = getenv("CLICKHOUSE_HISTORY_FILE"); // NOLINT(concurrency-mt-unsafe)
+        if (history_file_from_env)
+            history_file = history_file_from_env;
+        else if (!home_path.empty())
+            history_file = home_path + "/.clickhouse-client-history";
+    }
 
     if (!history_file.empty() && !fs::exists(history_file))
     {
@@ -2555,7 +2536,8 @@ void ClientBase::runInteractive()
 
 #if USE_REPLXX
     replxx::Replxx::highlighter_callback_t highlight_callback{};
-    if (enable_highlight)
+
+    if (getClientConfiguration().getBool("highlight", true))
         highlight_callback = highlight;
 
     String actual_history_file_path;
@@ -2565,7 +2547,7 @@ void ClientBase::runInteractive()
     lr = std::make_unique<ReplxxLineReader>(
         *suggest,
         actual_history_file_path,
-        multiline,
+        getClientConfiguration().has("multiline"),
         query_extenders,
         query_delimiters,
         word_break_characters,
@@ -2577,7 +2559,16 @@ void ClientBase::runInteractive()
         err_fd
     );
 #else
-    lr = std::make_unique<LineReader>(history_file, multiline, query_extenders, query_delimiters, input_stream, output_stream, in_fd);
+    lr = lr(
+        history_file,
+        getClientConfiguration().has("multiline"),
+        query_extenders,
+        query_delimiters,
+        word_break_characters,
+        input_stream,
+        output_stream,
+        in_fd
+    );
 #endif
 
     /// Enable bracketed-paste-mode so that we are able to paste multiline queries as a whole.
@@ -2657,7 +2648,7 @@ void ClientBase::runInteractive()
         {
             // If a separate connection loading suggestions failed to open a new session,
             // use the main session to receive them.
-            suggest->load(*connection, connection_parameters.timeouts, suggestion_limit, global_context->getClientInfo());
+            suggest->load(*connection, connection_parameters.timeouts, getClientConfiguration().getInt("suggestion_limit"), global_context->getClientInfo());
         }
 
         try
@@ -2668,6 +2659,9 @@ void ClientBase::runInteractive()
         }
         catch (const Exception & e)
         {
+            if (e.code() == ErrorCodes::USER_EXPIRED)
+                break;
+
             /// We don't need to handle the test hints in the interactive mode.
             error_stream << "Exception on client:" << std::endl << getExceptionMessage(e, print_stack_trace, true) << std::endl << std::endl;
             client_exception.reset(e.clone());
@@ -2701,7 +2695,7 @@ bool ClientBase::processMultiQueryFromFile(const String & file_name)
     ReadBufferFromFile in(file_name);
     readStringUntilEOF(queries_from_file, in);
 
-    if (!has_log_comment)
+    if (!getClientConfiguration().has("log_comment"))
     {
         Settings settings = global_context->getSettings();
         /// NOTE: cannot use even weakly_canonical() since it fails for /dev/stdin due to resolving of "pipe:[X]"

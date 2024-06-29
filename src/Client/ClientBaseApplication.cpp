@@ -123,18 +123,6 @@ void interruptSignalHandler(int signum)
 }
 
 
-void ClientBaseApplication::initUserProvidedQueryIdFormats()
-{
-    if (getClientConfiguration().has("query_id_formats"))
-    {
-        Poco::Util::AbstractConfiguration::Keys keys;
-        getClientConfiguration().keys("query_id_formats", keys);
-        for (const auto & name : keys)
-            query_id_formats.emplace_back(name + ":", getClientConfiguration().getString("query_id_formats." + name));
-    }
-}
-
-
 ClientBaseApplication::~ClientBaseApplication() = default;
 
 ClientBaseApplication::ClientBaseApplication() : ClientBase(STDIN_FILENO, STDOUT_FILENO, STDERR_FILENO, std::cin, std::cout, std::cerr) {}
@@ -154,14 +142,14 @@ void ClientBaseApplication::setupSignalHandler()
     sigemptyset(&new_act.sa_mask);
 #else
     if (sigemptyset(&new_act.sa_mask))
-        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 #endif
 
     if (sigaction(SIGINT, &new_act, nullptr))
-        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 
     if (sigaction(SIGQUIT, &new_act, nullptr))
-        ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
+        throw ErrnoException(ErrorCodes::CANNOT_SET_SIGNAL_HANDLER, "Cannot set signal handler.");
 }
 
 

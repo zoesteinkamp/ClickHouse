@@ -14,4 +14,3 @@ uint16_t getTerminalWidth(int in_fd = STDIN_FILENO, int err_fd = STDERR_FILENO);
  *  when program is called with option --help
  * */
 po::options_description createOptionsDescription(const std::string &caption, unsigned short terminal_width); /// NOLINT
-

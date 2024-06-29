@@ -10,7 +10,8 @@ namespace DB
 class ReplxxLineReader : public LineReader
 {
 public:
-    ReplxxLineReader(
+    ReplxxLineReader
+    (
         Suggest & suggest,
         const String & history_file_path,
         bool multiline,
@@ -22,7 +23,9 @@ public:
         std::ostream & output_stream_ = std::cout,
         int in_fd_ = STDIN_FILENO,
         int out_fd_ = STDOUT_FILENO,
-        int err_fd_ = STDERR_FILENO);
+        int err_fd_ = STDERR_FILENO
+    );
+
     ~ReplxxLineReader() override;
 
     void enableBracketedPaste() override;

@@ -1,4 +1,7 @@
-#include "SSHChannel.h"
+#include <Server/SSH/SSHChannel.h>
+
+#if USE_SSH
+
 #include <stdexcept>
 #include <Common/Exception.h>
 #include <Common/clibssh.h>
@@ -80,3 +83,5 @@ void SSHChannel::deleter(ssh_channel ch)
 }
 
 }
+
+#endif

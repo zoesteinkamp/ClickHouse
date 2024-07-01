@@ -1,9 +1,13 @@
 #pragma once
 
+#include "config.h"
+
+#if USE_SSH
+
 #include <cstdint>
 #include <memory>
 #include <string>
-#include "base/types.h"
+#include <base/types.h>
 #include <Server/SSH/SSHSession.h>
 
 struct ssh_bind_struct;
@@ -46,3 +50,5 @@ private:
 };
 
 }
+
+#endif

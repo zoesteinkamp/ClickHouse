@@ -1,14 +1,21 @@
 #pragma once
+
+#include "config.h"
+
+#if USE_SSH
+
+#include <optional>
+
 #include <Server/SSH/SSHPtyHandler.h>
 #include <Server/TCPServer.h>
 #include <Server/TCPServerConnectionFactory.h>
 #include <Poco/Util/AbstractConfiguration.h>
-#include "Common/Exception.h"
+#include <Common/Exception.h>
 #include <Common/logger_useful.h>
-#include "Server/IServer.h"
-#include "Common/LibSSHLogger.h"
-#include "Server/SSH/SSHBind.h"
-#include "Server/SSH/SSHSession.h"
+#include <Server/IServer.h>
+#include <Common/LibSSHLogger.h>
+#include <Server/SSH/SSHBind.h>
+#include <Server/SSH/SSHSession.h>
 
 namespace Poco
 {
@@ -109,3 +116,5 @@ public:
 };
 
 }
+
+#endif

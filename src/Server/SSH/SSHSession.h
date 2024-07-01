@@ -1,13 +1,16 @@
 #pragma once
 
+#include "config.h"
+
+#if USE_SSH
+
 #include <memory>
-#include "base/types.h"
+#include <base/types.h>
 
 struct ssh_session_struct;
 
 namespace ssh
 {
-
 
 // Wrapper around libssh's ssh_session
 class SSHSession
@@ -49,3 +52,5 @@ private:
 };
 
 }
+
+#endif

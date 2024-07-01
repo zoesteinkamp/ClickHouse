@@ -1,7 +1,11 @@
 #pragma once
 
+#include "config.h"
+
+#if USE_SSH
+
 #include <memory>
-#include "Server/SSH/SSHSession.h"
+#include <Server/SSH/SSHSession.h>
 
 struct ssh_channel_struct;
 
@@ -42,3 +46,5 @@ private:
 };
 
 }
+
+#endif

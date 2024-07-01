@@ -1,4 +1,7 @@
-#include "SSHEvent.h"
+#include <Server/SSH/SSHEvent.h>
+
+#if USE_SSH
+
 #include <stdexcept>
 #include <Common/Exception.h>
 #include <Common/clibssh.h>
@@ -82,3 +85,5 @@ void SSHEvent::deleter(EventPtr e)
 }
 
 }
+
+#endif

@@ -1,8 +1,5 @@
 #pragma once
 
-#include "clibssh.h"
-
-
 namespace ssh
 {
 
@@ -12,11 +9,7 @@ public:
     LibSSHInitializer(const LibSSHInitializer &) = delete;
     LibSSHInitializer & operator=(const LibSSHInitializer &) = delete;
 
-    static LibSSHInitializer & instance()
-    {
-        static LibSSHInitializer instance;
-        return instance;
-    }
+    static LibSSHInitializer & instance();
 
     ~LibSSHInitializer();
 

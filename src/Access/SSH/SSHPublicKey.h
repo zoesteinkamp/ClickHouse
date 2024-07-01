@@ -11,7 +11,6 @@ struct ssh_key_struct;
 namespace ssh
 {
 
-
 class SSHPublicKey
 {
 private:

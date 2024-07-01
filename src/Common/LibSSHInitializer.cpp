@@ -1,5 +1,12 @@
-#include "LibSSHInitializer.h"
+#include "config.h"
+
+#include <Common/LibSSHInitializer.h>
 #include <Common/Exception.h>
+
+#if USE_SSH
+
+#    include <Common/clibssh.h>
+
 
 namespace DB
 {
@@ -13,6 +20,14 @@ namespace ErrorCodes
 
 namespace ssh
 {
+
+LibSSHInitializer & LibSSHInitializer::instance()
+{
+    static LibSSHInitializer instance;
+    return instance;
+}
+
+
 
 LibSSHInitializer::LibSSHInitializer()
 {
@@ -29,3 +44,21 @@ LibSSHInitializer::~LibSSHInitializer()
 }
 
 }
+
+#else
+
+namespace ssh
+{
+
+LibSSHInitializer & LibSSHInitializer::instance()
+{
+    static LibSSHInitializer instance;
+    return instance;
+}
+
+LibSSHInitializer::LibSSHInitializer() {}
+LibSSHInitializer::~LibSSHInitializer() {}
+
+}
+
+#endif

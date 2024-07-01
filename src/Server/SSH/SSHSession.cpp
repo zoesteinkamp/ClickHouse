@@ -1,4 +1,7 @@
-#include "SSHSession.h"
+#include <Server/SSH/SSHSession.h>
+
+#if USE_SSH
+
 #include <stdexcept>
 #include <fmt/format.h>
 #include <Common/Exception.h>
@@ -136,3 +139,5 @@ void SSHSession::deleter(SessionPtr session)
 }
 
 }
+
+#endif

@@ -2,5 +2,7 @@
 
 namespace ssh::libsshLogger
 {
+
 void initialize();
+
 }

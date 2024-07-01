@@ -1,4 +1,7 @@
-#include "SSHBind.h"
+#include <Server/SSH/SSHBind.h>
+
+#if USE_SSH
+
 #include <stdexcept>
 #include <fmt/format.h>
 #include <Common/Exception.h>
@@ -13,7 +16,6 @@ namespace ErrorCodes
 }
 
 }
-
 
 namespace ssh
 {
@@ -73,3 +75,5 @@ void SSHBind::deleter(BindPtr bind)
 }
 
 }
+
+#endif

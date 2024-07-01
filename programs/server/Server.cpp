@@ -2539,7 +2539,7 @@ void Server::createServers(
             servers,
             [&](UInt16 port) -> ProtocolServerAdapter
             {
-#if USE_SSL
+#if USE_SSH
                 Poco::Net::ServerSocket socket;
                 auto address = socketBindListen(config, socket, listen_host, port, /* secure = */ false);
                 return ProtocolServerAdapter(

@@ -5,8 +5,7 @@
 
 #if USE_SSH
 
-#    include <Common/clibssh.h>
-
+#include <Common/clibssh.h>
 
 namespace DB
 {
@@ -26,8 +25,6 @@ LibSSHInitializer & LibSSHInitializer::instance()
     static LibSSHInitializer instance;
     return instance;
 }
-
-
 
 LibSSHInitializer::LibSSHInitializer()
 {

@@ -26,7 +26,6 @@ public:
 
     /// The only proper way to construct task
     static RefreshTaskHolder create(
-        const StorageMaterializedView & view,
         ContextMutablePtr context,
         const DB::ASTRefreshStrategy & strategy);
 
@@ -61,8 +60,11 @@ public:
     /// For tests
     void setFakeTime(std::optional<Int64> t);
 
+    /// RefreshSet will set handle for refresh tasks, to avoid race condition.
+    void setRefreshSetHandleUnlock(RefreshSet::Handle && set_handle_);
+
 private:
-    Poco::Logger * log = nullptr;
+    LoggerPtr log = nullptr;
     std::weak_ptr<IStorage> view_to_refresh;
 
     /// Protects interrupt_execution and running_executor.
@@ -81,9 +83,11 @@ private:
 
     RefreshSchedule refresh_schedule;
     RefreshSettings refresh_settings; // TODO: populate, use, update on alter
+    std::vector<StorageID> initial_dependencies;
     RefreshSet::Handle set_handle;
 
     /// StorageIDs of our dependencies that we're waiting for.
+    using DatabaseAndTableNameSet = std::unordered_set<StorageID, StorageID::DatabaseAndTableNameHash, StorageID::DatabaseAndTableNameEqual>;
     DatabaseAndTableNameSet remaining_dependencies;
     bool time_arrived = false;
 

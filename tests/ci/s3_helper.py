@@ -5,20 +5,19 @@ import shutil
 import time
 from multiprocessing.dummy import Pool
 from pathlib import Path
-from typing import List, Union
+from typing import Any, List, Union
 
 import boto3  # type: ignore
 import botocore  # type: ignore
-
-from env_helper import (
-    S3_TEST_REPORTS_BUCKET,
-    S3_BUILDS_BUCKET,
-    RUNNER_TEMP,
-    CI,
-    S3_URL,
-    S3_DOWNLOAD,
-)
 from compress_files import compress_file_fast
+from env_helper import (
+    IS_CI,
+    RUNNER_TEMP,
+    S3_BUILDS_BUCKET,
+    S3_DOWNLOAD,
+    S3_TEST_REPORTS_BUCKET,
+    S3_URL,
+)
 
 
 def _flatten_list(lst):
@@ -34,11 +33,14 @@ def _flatten_list(lst):
 class S3Helper:
     max_pool_size = 100
 
-    def __init__(self):
+    def __init__(self, client: Any = None, endpoint: str = S3_URL):
+        self.host = endpoint
+        if client is not None:
+            self.client = client
+            return
         config = botocore.config.Config(max_pool_connections=self.max_pool_size)
-        self.session = boto3.session.Session(region_name="us-east-1")
-        self.client = self.session.client("s3", endpoint_url=S3_URL, config=config)
-        self.host = S3_URL
+        session = boto3.session.Session(region_name="us-east-1")
+        self.client = session.client("s3", endpoint_url=endpoint, config=config)
 
     def _upload_file_to_s3(
         self, bucket_name: str, file_path: Path, s3_path: str
@@ -102,17 +104,20 @@ class S3Helper:
 
         self.client.upload_file(file_path, bucket_name, s3_path, ExtraArgs=metadata)
         url = self.s3_url(bucket_name, s3_path)
-        logging.info("Upload %s to %s. Meta: %s", file_path, url, metadata)
+        logging.info("Upload %s to %s Meta: %s", file_path, url, metadata)
         return url
 
+    def delete_file_from_s3(self, bucket_name: str, s3_path: str) -> None:
+        self.client.delete_object(Bucket=bucket_name, Key=s3_path)
+
     def upload_test_report_to_s3(self, file_path: Path, s3_path: str) -> str:
-        if CI:
+        if IS_CI:
             return self._upload_file_to_s3(S3_TEST_REPORTS_BUCKET, file_path, s3_path)
 
         return S3Helper.copy_file_to_local(S3_TEST_REPORTS_BUCKET, file_path, s3_path)
 
     def upload_build_file_to_s3(self, file_path: Path, s3_path: str) -> str:
-        if CI:
+        if IS_CI:
             return self._upload_file_to_s3(S3_BUILDS_BUCKET, file_path, s3_path)
 
         return S3Helper.copy_file_to_local(S3_BUILDS_BUCKET, file_path, s3_path)
@@ -199,6 +204,7 @@ class S3Helper:
                     t = time.time()
             except Exception as ex:
                 logging.critical("Failed to upload file, expcetion %s", ex)
+                return ""
             return self.s3_url(bucket_name, s3_path)
 
         p = Pool(self.max_pool_size)
@@ -249,7 +255,7 @@ class S3Helper:
 
             if full_fs_path.is_symlink():
                 if upload_symlinks:
-                    if CI:
+                    if IS_CI:
                         return self._upload_file_to_s3(
                             bucket_name,
                             full_fs_path,
@@ -260,7 +266,7 @@ class S3Helper:
                     )
                 return []
 
-            if CI:
+            if IS_CI:
                 return self._upload_file_to_s3(
                     bucket_name, full_fs_path, full_s3_path + "/" + file_path.name
                 )
@@ -325,7 +331,7 @@ class S3Helper:
         return result
 
     def url_if_exists(self, key: str, bucket: str = S3_BUILDS_BUCKET) -> str:
-        if not CI:
+        if not IS_CI:
             local_path = self.local_path(bucket, key)
             if local_path.exists():
                 return local_path.as_uri()
@@ -339,7 +345,7 @@ class S3Helper:
 
     @staticmethod
     def get_url(bucket: str, key: str) -> str:
-        if CI:
+        if IS_CI:
             return S3Helper.s3_url(bucket, key)
         return S3Helper.local_path(bucket, key).as_uri()
 

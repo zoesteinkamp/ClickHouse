@@ -106,13 +106,14 @@ void CSVRowInputFormat::syncAfterError()
 
 void CSVRowInputFormat::setReadBuffer(ReadBuffer & in_)
 {
-    buf->setSubBuffer(in_);
+    buf = std::make_unique<PeekableReadBuffer>(in_);
+    RowInputFormatWithNamesAndTypes::setReadBuffer(*buf);
 }
 
-void CSVRowInputFormat::resetParser()
+void CSVRowInputFormat::resetReadBuffer()
 {
-    RowInputFormatWithNamesAndTypes::resetParser();
-    buf->reset();
+    buf.reset();
+    RowInputFormatWithNamesAndTypes::resetReadBuffer();
 }
 
 void CSVFormatReader::skipRow()
@@ -391,7 +392,7 @@ bool CSVFormatReader::readFieldImpl(ReadBuffer & istr, DB::IColumn & column, con
     if (format_settings.null_as_default && !isNullableOrLowCardinalityNullable(type))
     {
         /// If value is null but type is not nullable then use default value instead.
-        return SerializationNullable::deserializeTextCSVImpl(column, istr, format_settings, serialization);
+        return SerializationNullable::deserializeNullAsDefaultOrNestedTextCSV(column, istr, format_settings, serialization);
     }
 
     /// Read the column normally.
@@ -615,7 +616,7 @@ void registerCSVSchemaReader(FormatFactory & factory)
             {
                 String result = getAdditionalFormatInfoByEscapingRule(settings, FormatSettings::EscapingRule::CSV);
                 if (!with_names)
-                    result += fmt::format(", column_names_for_schema_inference={}, try_detect_header={}", settings.column_names_for_schema_inference, settings.csv.try_detect_header);
+                    result += fmt::format(", column_names_for_schema_inference={}, try_detect_header={}, skip_first_lines={}", settings.column_names_for_schema_inference, settings.csv.try_detect_header, settings.csv.skip_first_lines);
                 return result;
             });
         }

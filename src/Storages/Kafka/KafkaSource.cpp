@@ -33,7 +33,7 @@ KafkaSource::KafkaSource(
     const StorageSnapshotPtr & storage_snapshot_,
     const ContextPtr & context_,
     const Names & columns,
-    Poco::Logger * log_,
+    LoggerPtr log_,
     size_t max_block_size_,
     bool commit_in_suffix_)
     : ISource(storage_snapshot_->getSampleBlockForColumns(columns))
@@ -45,7 +45,7 @@ KafkaSource::KafkaSource(
     , max_block_size(max_block_size_)
     , commit_in_suffix(commit_in_suffix_)
     , non_virtual_header(storage_snapshot->metadata->getSampleBlockNonMaterialized())
-    , virtual_header(storage_snapshot->getSampleBlockForColumns(storage.getVirtualColumnNames()))
+    , virtual_header(storage.getVirtualsHeader())
     , handle_error_mode(storage.getStreamingHandleErrorMode())
 {
 }
@@ -262,7 +262,7 @@ Chunk KafkaSource::generateImpl()
     // they are not needed here:
     // and it's misleading to use them here,
     // as columns 'materialized' that way stays 'ephemeral'
-    // i.e. will not be stored anythere
+    // i.e. will not be stored anywhere
     // If needed any extra columns can be added using DEFAULT they can be added at MV level if needed.
 
     auto result_block  = non_virtual_header.cloneWithColumns(executor.getResultColumns());

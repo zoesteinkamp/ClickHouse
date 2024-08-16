@@ -2,7 +2,9 @@
 
 #include <Analyzer/InDepthQueryTreeVisitor.h>
 #include <Analyzer/FunctionNode.h>
+#include <Core/Settings.h>
 #include <Functions/FunctionFactory.h>
+#include <Functions/if.h>
 
 namespace DB
 {
@@ -52,9 +54,10 @@ private:
 
 }
 
-void MultiIfToIfPass::run(QueryTreeNodePtr query_tree_node, ContextPtr context)
+void MultiIfToIfPass::run(QueryTreeNodePtr & query_tree_node, ContextPtr context)
 {
-    auto if_function_ptr = FunctionFactory::instance().get("if", context);
+    const auto & settings = context->getSettingsRef();
+    auto if_function_ptr = createInternalFunctionIfOverloadResolver(settings.allow_experimental_variant_type, settings.use_variant_as_common_type);
     MultiIfToIfVisitor visitor(std::move(if_function_ptr), std::move(context));
     visitor.visit(query_tree_node);
 }

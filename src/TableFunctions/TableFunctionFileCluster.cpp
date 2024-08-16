@@ -1,3 +1,4 @@
+#include <Core/Settings.h>
 #include <Storages/StorageFile.h>
 #include <TableFunctions/TableFunctionFileCluster.h>
 #include <TableFunctions/TableFunctionFactory.h>
@@ -43,8 +44,7 @@ StoragePtr TableFunctionFileCluster::getStorage(
             compression_method,
             StorageID(getDatabaseName(), table_name),
             columns,
-            ConstraintsDescription{},
-            structure != "auto");
+            ConstraintsDescription{});
     }
 
     return storage;

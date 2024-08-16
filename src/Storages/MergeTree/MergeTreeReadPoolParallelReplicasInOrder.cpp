@@ -12,27 +12,31 @@ MergeTreeReadPoolParallelReplicasInOrder::MergeTreeReadPoolParallelReplicasInOrd
     ParallelReadingExtension extension_,
     CoordinationMode mode_,
     RangesInDataParts parts_,
+    VirtualFields shared_virtual_fields_,
     const StorageSnapshotPtr & storage_snapshot_,
     const PrewhereInfoPtr & prewhere_info_,
     const ExpressionActionsSettings & actions_settings_,
     const MergeTreeReaderSettings & reader_settings_,
     const Names & column_names_,
-    const Names & virtual_column_names_,
     const PoolSettings & settings_,
     const ContextPtr & context_)
     : MergeTreeReadPoolBase(
         std::move(parts_),
+        std::move(shared_virtual_fields_),
         storage_snapshot_,
         prewhere_info_,
         actions_settings_,
         reader_settings_,
         column_names_,
-        virtual_column_names_,
         settings_,
         context_)
     , extension(std::move(extension_))
     , mode(mode_)
+    , min_marks_per_task(pool_settings.min_marks_for_concurrent_read)
 {
+    for (const auto & info : per_part_infos)
+        min_marks_per_task = std::max(min_marks_per_task, info->min_marks_per_task);
+
     for (const auto & part : parts_ranges)
         request.push_back({part.data_part->info, MarkRanges{}});
 
@@ -76,12 +80,8 @@ MergeTreeReadTaskPtr MergeTreeReadPoolParallelReplicasInOrder::getTask(size_t ta
     if (no_more_tasks)
         return nullptr;
 
-    auto response = extension.callback(ParallelReadRequest(
-        mode,
-        extension.number_of_current_replica,
-        pool_settings.min_marks_for_concurrent_read * request.size(),
-        request
-    ));
+    auto response
+        = extension.callback(ParallelReadRequest(mode, extension.number_of_current_replica, min_marks_per_task * request.size(), request));
 
     if (!response || response->description.empty() || response->finish)
     {

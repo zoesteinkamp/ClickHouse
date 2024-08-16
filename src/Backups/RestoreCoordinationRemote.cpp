@@ -3,6 +3,7 @@
 #include <Backups/RestoreCoordinationRemote.h>
 #include <Backups/BackupCoordinationStageSync.h>
 #include <Parsers/ASTCreateQuery.h>
+#include <Parsers/CreateQueryUUIDs.h>
 #include <Parsers/formatAST.h>
 #include <Functions/UserDefined/UserDefinedSQLObjectType.h>
 #include <Common/ZooKeeper/KeeperException.h>
@@ -21,7 +22,8 @@ RestoreCoordinationRemote::RestoreCoordinationRemote(
     const String & restore_uuid_,
     const Strings & all_hosts_,
     const String & current_host_,
-    bool is_internal_)
+    bool is_internal_,
+    QueryStatusPtr process_list_element_)
     : get_zookeeper(get_zookeeper_)
     , root_zookeeper_path(root_zookeeper_path_)
     , keeper_settings(keeper_settings_)
@@ -31,11 +33,12 @@ RestoreCoordinationRemote::RestoreCoordinationRemote(
     , current_host(current_host_)
     , current_host_index(BackupCoordinationRemote::findCurrentHostIndex(all_hosts, current_host))
     , is_internal(is_internal_)
-    , log(&Poco::Logger::get("RestoreCoordinationRemote"))
+    , log(getLogger("RestoreCoordinationRemote"))
     , with_retries(
         log,
         get_zookeeper_,
         keeper_settings,
+        process_list_element_,
         [my_zookeeper_path = zookeeper_path, my_current_host = current_host, my_is_internal = is_internal]
         (WithRetries::FaultyKeeper & zk)
         {
@@ -267,7 +270,8 @@ bool RestoreCoordinationRemote::acquireInsertingDataForKeeperMap(const String & 
 void RestoreCoordinationRemote::generateUUIDForTable(ASTCreateQuery & create_query)
 {
     String query_str = serializeAST(create_query);
-    String new_uuids_str = create_query.generateRandomUUID(/* always_generate_new_uuid= */ true).toString();
+    CreateQueryUUIDs new_uuids{create_query, /* generate_random= */ true, /* force_random= */ true};
+    String new_uuids_str = new_uuids.toString();
 
     auto holder = with_retries.createRetriesControlHolder("generateUUIDForTable");
     holder.retries_ctl.retryLoop(
@@ -279,11 +283,14 @@ void RestoreCoordinationRemote::generateUUIDForTable(ASTCreateQuery & create_que
             Coordination::Error res = zk->tryCreate(path, new_uuids_str, zkutil::CreateMode::Persistent);
 
             if (res == Coordination::Error::ZOK)
+            {
+                new_uuids.copyToQuery(create_query);
                 return;
+            }
 
             if (res == Coordination::Error::ZNODEEXISTS)
             {
-                create_query.setUUID(ASTCreateQuery::UUIDs::fromString(zk->get(path)));
+                CreateQueryUUIDs::fromString(zk->get(path)).copyToQuery(create_query);
                 return;
             }
 
@@ -316,7 +323,7 @@ bool RestoreCoordinationRemote::hasConcurrentRestores(const std::atomic<size_t> 
         return false;
 
     bool result = false;
-    std::string path = zookeeper_path +"/stage";
+    std::string path = zookeeper_path + "/stage";
 
     auto holder = with_retries.createRetriesControlHolder("createRootNodes");
     holder.retries_ctl.retryLoop(

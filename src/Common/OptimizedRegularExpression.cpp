@@ -40,8 +40,7 @@ size_t shortest_literal_length(const Literals & literals)
     if (literals.empty()) return 0;
     size_t shortest = std::numeric_limits<size_t>::max();
     for (const auto & lit : literals)
-        if (shortest > lit.literal.size())
-            shortest = lit.literal.size();
+        shortest = std::min(shortest, lit.literal.size());
     return shortest;
 }
 
@@ -245,33 +244,43 @@ const char * analyzeImpl(
                 is_trivial = false;
                 if (!in_square_braces)
                 {
-                    /// Check for case-insensitive flag.
-                    if (pos + 1 < end && pos[1] == '?')
+                    /// it means flag negation
+                    /// there are various possible flags
+                    /// actually only imsU are supported by re2
+                    auto is_flag_char = [](char x)
                     {
-                        for (size_t offset = 2; pos + offset < end; ++offset)
+                        return x == '-' || x == 'i' || x == 'm' || x == 's' || x == 'U' || x == 'u';
+                    };
+                    /// Check for case-insensitive flag.
+                    if (pos + 2 < end && pos[1] == '?' && is_flag_char(pos[2]))
+                    {
+                        size_t offset = 2;
+                        for (; pos + offset < end; ++offset)
                         {
-                            if (pos[offset] == '-'  /// it means flag negation
-                                /// various possible flags, actually only imsU are supported by re2
-                                || (pos[offset] >= 'a' && pos[offset] <= 'z')
-                                || (pos[offset] >= 'A' && pos[offset] <= 'Z'))
+                            if (pos[offset] == 'i')
                             {
-                                if (pos[offset] == 'i')
-                                {
-                                    /// Actually it can be negated case-insensitive flag. But we don't care.
-                                    has_case_insensitive_flag = true;
-                                    break;
-                                }
+                                /// Actually it can be negated case-insensitive flag. But we don't care.
+                                has_case_insensitive_flag = true;
                             }
-                            else
+                            else if (!is_flag_char(pos[offset]))
                                 break;
+                        }
+                        pos += offset;
+                        if (pos == end)
+                            return pos;
+                        /// if this group only contains flags, we have nothing to do.
+                        if (*pos == ')')
+                        {
+                            ++pos;
+                            break;
                         }
                     }
                     /// (?:regex) means non-capturing parentheses group
-                    if (pos + 2 < end && pos[1] == '?' && pos[2] == ':')
+                    else if (pos + 2 < end && pos[1] == '?' && pos[2] == ':')
                     {
                         pos += 2;
                     }
-                    if (pos + 3 < end && pos[1] == '?' && (pos[2] == '<' || pos[2] == '\'' || (pos[2] == 'P' && pos[3] == '<')))
+                    else if (pos + 3 < end && pos[1] == '?' && (pos[2] == '<' || pos[2] == '\'' || (pos[2] == 'P' && pos[3] == '<')))
                     {
                         pos = skipNameCapturingGroup(pos, pos[2] == 'P' ? 3: 2, end);
                     }
@@ -451,7 +460,7 @@ try
 {
     Literals alternative_literals;
     Literal required_literal;
-    analyzeImpl(regexp_, regexp_.data(), required_literal, is_trivial, alternative_literals);
+    analyzeImpl(regexp_, regexp_.data(), required_literal, is_trivial, alternative_literals); // NOLINT
     required_substring = std::move(required_literal.literal);
     required_substring_is_prefix = required_literal.prefix;
     for (auto & lit : alternative_literals)
@@ -463,7 +472,7 @@ catch (...)
     is_trivial = false;
     required_substring_is_prefix = false;
     alternatives.clear();
-    LOG_ERROR(&Poco::Logger::get("OptimizeRegularExpression"), "Analyze RegularExpression failed, got error: {}", DB::getCurrentExceptionMessage(false));
+    LOG_ERROR(getLogger("OptimizeRegularExpression"), "Analyze RegularExpression failed, got error: {}", DB::getCurrentExceptionMessage(false));
 }
 
 OptimizedRegularExpression::OptimizedRegularExpression(const std::string & regexp_, int options)
@@ -484,7 +493,7 @@ OptimizedRegularExpression::OptimizedRegularExpression(const std::string & regex
     if (!is_trivial)
     {
         /// Compile the re2 regular expression.
-        typename re2::RE2::Options regexp_options;
+        re2::RE2::Options regexp_options;
 
         /// Never write error messages to stderr. It's ignorant to do it from library code.
         regexp_options.set_log_errors(false);
@@ -649,8 +658,7 @@ unsigned OptimizedRegularExpression::match(const char * subject, size_t subject_
     if (limit == 0)
         return 0;
 
-    if (limit > number_of_subpatterns + 1)
-        limit = number_of_subpatterns + 1;
+    limit = std::min(limit, number_of_subpatterns + 1);
 
     if (is_trivial)
     {

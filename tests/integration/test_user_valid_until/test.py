@@ -5,7 +5,7 @@ from time import sleep
 from helpers.cluster import ClickHouseCluster
 
 cluster = ClickHouseCluster(__file__)
-node = cluster.add_instance("node")
+node = cluster.add_instance("node", stay_alive=True)
 
 
 @pytest.fixture(scope="module")
@@ -78,7 +78,28 @@ def test_details(started_cluster):
     # 2. Time only is not supported
     node.query("CREATE USER user_details_time_only VALID UNTIL '22:03:40'")
 
+    until_year = datetime.today().strftime("%Y")
+
     assert (
         node.query("SHOW CREATE USER user_details_time_only")
-        == "CREATE USER user_details_time_only VALID UNTIL \\'2023-01-01 22:03:40\\'\n"
+        == f"CREATE USER user_details_time_only VALID UNTIL \\'{until_year}-01-01 22:03:40\\'\n"
     )
+
+
+def test_restart(started_cluster):
+    node.query("CREATE USER user_restart VALID UNTIL '06/11/2010 08:03:20 Z+3'")
+
+    assert (
+        node.query("SHOW CREATE USER user_restart")
+        == "CREATE USER user_restart VALID UNTIL \\'2010-11-06 05:03:20\\'\n"
+    )
+
+    node.restart_clickhouse()
+
+    assert (
+        node.query("SHOW CREATE USER user_restart")
+        == "CREATE USER user_restart VALID UNTIL \\'2010-11-06 05:03:20\\'\n"
+    )
+
+    error = "Authentication failed"
+    assert error in node.query_and_get_error("SELECT 1", user="user_restart")

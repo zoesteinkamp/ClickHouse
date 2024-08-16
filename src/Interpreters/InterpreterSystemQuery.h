@@ -43,11 +43,11 @@ public:
 
     static void startStopActionInDatabase(StorageActionBlockType action_type, bool start,
                                           const String & database_name, const DatabasePtr & database,
-                                          const ContextPtr & local_context, Poco::Logger * log);
+                                          const ContextPtr & local_context, LoggerPtr log);
 
 private:
     ASTPtr query_ptr;
-    Poco::Logger * log = nullptr;
+    LoggerPtr log = nullptr;
     StorageID table_id = StorageID::createEmpty();      /// Will be set up if query contains table name
     VolumePtr volume_ptr;
 
@@ -60,6 +60,7 @@ private:
     void syncReplica(ASTSystemQuery & query);
     void setReplicaReadiness(bool ready);
     void waitLoadingParts();
+    void unloadPrimaryKeys();
 
     void syncReplicatedDatabase(ASTSystemQuery & query);
 
@@ -73,7 +74,7 @@ private:
     void flushDistributed(ASTSystemQuery & query);
     [[noreturn]] void restartDisk(String & name);
 
-    RefreshTaskHolder getRefreshTask();
+    RefreshTaskList getRefreshTasks();
 
     AccessRightsElements getRequiredAccessForDDLOnCluster() const;
     void startStopAction(StorageActionBlockType action_type, bool start);

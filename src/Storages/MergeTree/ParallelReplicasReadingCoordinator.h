@@ -15,7 +15,7 @@ class ParallelReplicasReadingCoordinator
 public:
     class ImplInterface;
 
-    explicit ParallelReplicasReadingCoordinator(size_t replicas_count_);
+    explicit ParallelReplicasReadingCoordinator(size_t replicas_count_, size_t mark_segment_size_ = 0);
     ~ParallelReplicasReadingCoordinator();
 
     void handleInitialAllRangesAnnouncement(InitialAllRangesAnnouncement);
@@ -31,12 +31,11 @@ public:
     void setProgressCallback(ProgressCallback callback);
 
 private:
-    void initialize();
+    void initialize(CoordinationMode mode);
 
     std::mutex mutex;
-    size_t replicas_count{0};
-    CoordinationMode mode{CoordinationMode::Default};
-    std::atomic<bool> initialized{false};
+    const size_t replicas_count{0};
+    size_t mark_segment_size{0};
     std::unique_ptr<ImplInterface> pimpl;
     ProgressCallback progress_callback; // store the callback only to bypass it to coordinator implementation
     std::set<size_t> replicas_used;

@@ -37,7 +37,7 @@ namespace fs = std::filesystem;
 class CounterInFile
 {
 private:
-    static inline constexpr size_t SMALL_READ_WRITE_BUFFER_SIZE = 16;
+    static constexpr size_t SMALL_READ_WRITE_BUFFER_SIZE = 16;
 
 public:
     /// path - the name of the file, including the path
@@ -88,7 +88,7 @@ public:
                 {
                     /// A more understandable error message.
                     if (e.code() == DB::ErrorCodes::CANNOT_READ_ALL_DATA || e.code() == DB::ErrorCodes::ATTEMPT_TO_READ_AFTER_EOF)
-                        throw DB::ParsingException(e.code(), "File {} is empty. You must fill it manually with appropriate value.", path);
+                        throw DB::Exception(e.code(), "File {} is empty. You must fill it manually with appropriate value.", path);
                     else
                         throw;
                 }

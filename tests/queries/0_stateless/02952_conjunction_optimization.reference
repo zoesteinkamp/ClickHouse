@@ -9,7 +9,7 @@ QUERY id: 0
       COLUMN id: 2, column_name: a, result_type: Int32, source_id: 3
       COLUMN id: 4, column_name: b, result_type: String, source_id: 3
   JOIN TREE
-    TABLE id: 3, table_name: default.02952_disjunction_optimization
+    TABLE id: 3, alias: __table1, table_name: default.02952_disjunction_optimization
   WHERE
     FUNCTION id: 5, function_name: notIn, function_type: ordinary, result_type: UInt8
       ARGUMENTS
@@ -27,12 +27,12 @@ QUERY id: 0
       COLUMN id: 2, column_name: a, result_type: Int32, source_id: 3
       COLUMN id: 4, column_name: b, result_type: String, source_id: 3
   JOIN TREE
-    TABLE id: 3, table_name: default.02952_disjunction_optimization
+    TABLE id: 3, alias: __table1, table_name: default.02952_disjunction_optimization
   WHERE
     FUNCTION id: 5, function_name: and, function_type: ordinary, result_type: Bool
       ARGUMENTS
         LIST id: 6, nodes: 2
-          CONSTANT id: 7, constant_value: UInt64_1, constant_value_type: Bool
+          CONSTANT id: 7, constant_value: Bool_1, constant_value_type: Bool
           FUNCTION id: 8, function_name: notIn, function_type: ordinary, result_type: UInt8
             ARGUMENTS
               LIST id: 9, nodes: 2
@@ -48,7 +48,7 @@ QUERY id: 0
       COLUMN id: 2, column_name: a, result_type: Int32, source_id: 3
       COLUMN id: 4, column_name: b, result_type: String, source_id: 3
   JOIN TREE
-    TABLE id: 3, table_name: default.02952_disjunction_optimization
+    TABLE id: 3, alias: __table1, table_name: default.02952_disjunction_optimization
   WHERE
     FUNCTION id: 5, function_name: and, function_type: ordinary, result_type: UInt8
       ARGUMENTS
@@ -73,7 +73,7 @@ QUERY id: 0
       COLUMN id: 2, column_name: a, result_type: Int32, source_id: 3
       COLUMN id: 4, column_name: b, result_type: String, source_id: 3
   JOIN TREE
-    TABLE id: 3, table_name: default.02952_disjunction_optimization
+    TABLE id: 3, alias: __table1, table_name: default.02952_disjunction_optimization
   WHERE
     FUNCTION id: 5, function_name: and, function_type: ordinary, result_type: UInt8
       ARGUMENTS
@@ -100,7 +100,7 @@ QUERY id: 0
       COLUMN id: 2, column_name: a, result_type: Int32, source_id: 3
       COLUMN id: 4, column_name: b, result_type: String, source_id: 3
   JOIN TREE
-    TABLE id: 3, table_name: default.02952_disjunction_optimization
+    TABLE id: 3, alias: __table1, table_name: default.02952_disjunction_optimization
   WHERE
     FUNCTION id: 5, function_name: or, function_type: ordinary, result_type: UInt8
       ARGUMENTS

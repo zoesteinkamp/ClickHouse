@@ -1,13 +1,17 @@
 #include <Storages/MergeTree/MutateTask.h>
 
+#include <DataTypes/ObjectUtils.h>
+#include <IO/HashingWriteBuffer.h>
 #include <Common/logger_useful.h>
 #include <Common/escapeForFileName.h>
+#include <Core/Settings.h>
 #include <Storages/MergeTree/DataPartStorageOnDiskFull.h>
 #include <Storages/Statistics/Statistics.h>
 #include <Columns/ColumnsNumber.h>
 #include <Parsers/queryToString.h>
-#include <Interpreters/SquashingTransform.h>
+#include <Interpreters/Squashing.h>
 #include <Interpreters/MergeTreeTransaction.h>
+#include <Interpreters/PreparedSets.h>
 #include <Processors/Transforms/TTLTransform.h>
 #include <Processors/Transforms/TTLCalcTransform.h>
 #include <Processors/Transforms/DistinctSortedTransform.h>
@@ -16,15 +20,32 @@
 #include <Processors/Transforms/ExpressionTransform.h>
 #include <Processors/Transforms/MaterializingTransform.h>
 #include <Processors/Executors/PullingPipelineExecutor.h>
+#include <Processors/QueryPlan/CreatingSetsStep.h>
+#include <Processors/QueryPlan/Optimizations/QueryPlanOptimizationSettings.h>
 #include <Storages/MergeTree/StorageFromMergeTreeDataPart.h>
 #include <Storages/MergeTree/MergeTreeDataWriter.h>
 #include <Storages/MutationCommands.h>
 #include <Storages/MergeTree/MergeTreeDataMergerMutator.h>
-#include <Storages/MergeTree/MergeTreeIndexInverted.h>
+#include <Storages/MergeTree/MergeTreeIndexFullText.h>
+#include <Storages/MergeTree/MergeTreeSettings.h>
+#include <Storages/MergeTree/MergeTreeVirtualColumns.h>
 #include <DataTypes/DataTypeNullable.h>
+#include <DataTypes/DataTypeVariant.h>
 #include <boost/algorithm/string/replace.hpp>
 #include <Common/ProfileEventsScope.h>
+#include <Core/ColumnsWithTypeAndName.h>
 
+
+namespace ProfileEvents
+{
+    extern const Event MutationTotalParts;
+    extern const Event MutationUntouchedParts;
+    extern const Event MutationTotalMilliseconds;
+    extern const Event MutationExecuteMilliseconds;
+    extern const Event MutationAllPartColumns;
+    extern const Event MutationSomePartColumns;
+    extern const Event MutateTaskProjectionsCalculationMicroseconds;
+}
 
 namespace CurrentMetrics
 {
@@ -51,6 +72,41 @@ static bool checkOperationIsNotCanceled(ActionBlocker & merges_blocker, MergeLis
     return true;
 }
 
+static bool haveMutationsOfDynamicColumns(const MergeTreeData::DataPartPtr & data_part, const MutationCommands & commands)
+{
+    for (const auto & command : commands)
+    {
+        if (!command.column_name.empty())
+        {
+            auto column = data_part->tryGetColumn(command.column_name);
+            if (column && column->type->hasDynamicSubcolumns())
+                return true;
+        }
+    }
+
+    return false;
+}
+
+static UInt64 getExistingRowsCount(const Block & block)
+{
+    auto column = block.getByName(RowExistsColumn::name).column;
+    const ColumnUInt8 * row_exists_col = typeid_cast<const ColumnUInt8 *>(column.get());
+
+    if (!row_exists_col)
+    {
+        LOG_WARNING(&Poco::Logger::get("MutationHelpers::getExistingRowsCount"), "_row_exists column type is not UInt8");
+        return block.rows();
+    }
+
+    UInt64 existing_count = 0;
+
+    for (UInt8 row_exists : row_exists_col->getData())
+        if (row_exists)
+            existing_count++;
+
+    return existing_count;
+}
+
 /** Split mutation commands into two parts:
 *   First part should be executed by mutations interpreter.
 *   Other is just simple drop/renames, so they can be executed without interpreter.
@@ -61,20 +117,31 @@ static void splitAndModifyMutationCommands(
     const MutationCommands & commands,
     MutationCommands & for_interpreter,
     MutationCommands & for_file_renames,
-    Poco::Logger * log)
+    LoggerPtr log)
 {
     auto part_columns = part->getColumnsDescription();
+    const auto & table_columns = metadata_snapshot->getColumns();
 
-    if (!isWidePart(part) || !isFullPartStorage(part->getDataPartStorage()))
+    if (haveMutationsOfDynamicColumns(part, commands) || !isWidePart(part) || !isFullPartStorage(part->getDataPartStorage()))
     {
         NameSet mutated_columns;
         NameSet dropped_columns;
 
         for (const auto & command : commands)
         {
+            if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
+            {
+                /// For ordinary column with default or materialized expression, MATERIALIZE COLUMN should not override past values
+                /// So we only mutate column if `command.column_name` is a default/materialized column or if the part does not have physical column file
+                auto column_ordinary = table_columns.getOrdinary().tryGetByName(command.column_name);
+                if (!column_ordinary || !part->tryGetColumn(command.column_name) || !part->hasColumnFiles(*column_ordinary))
+                {
+                    for_interpreter.push_back(command);
+                    mutated_columns.emplace(command.column_name);
+                }
+            }
             if (command.type == MutationCommand::Type::MATERIALIZE_INDEX
-                || command.type == MutationCommand::Type::MATERIALIZE_STATISTIC
-                || command.type == MutationCommand::Type::MATERIALIZE_COLUMN
+                || command.type == MutationCommand::Type::MATERIALIZE_STATISTICS
                 || command.type == MutationCommand::Type::MATERIALIZE_PROJECTION
                 || command.type == MutationCommand::Type::MATERIALIZE_TTL
                 || command.type == MutationCommand::Type::DELETE
@@ -84,13 +151,10 @@ static void splitAndModifyMutationCommands(
                 for_interpreter.push_back(command);
                 for (const auto & [column_name, expr] : command.column_to_update_expression)
                     mutated_columns.emplace(column_name);
-
-                if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
-                    mutated_columns.emplace(command.column_name);
             }
             else if (command.type == MutationCommand::Type::DROP_INDEX
                      || command.type == MutationCommand::Type::DROP_PROJECTION
-                     || command.type == MutationCommand::Type::DROP_STATISTIC)
+                     || command.type == MutationCommand::Type::DROP_STATISTICS)
             {
                 for_file_renames.push_back(command);
             }
@@ -151,7 +215,7 @@ static void splitAndModifyMutationCommands(
         {
             if (!mutated_columns.contains(column.name))
             {
-                if (!metadata_snapshot->getColumns().has(column.name) && !part->storage.getVirtuals().contains(column.name))
+                if (!metadata_snapshot->getColumns().has(column.name) && !part->storage.getVirtualsPtr()->has(column.name))
                 {
                     /// We cannot add the column because there's no such column in table.
                     /// It's okay if the column was dropped. It may also absent in dropped_columns
@@ -196,9 +260,16 @@ static void splitAndModifyMutationCommands(
     {
         for (const auto & command : commands)
         {
-            if (command.type == MutationCommand::Type::MATERIALIZE_INDEX
-                || command.type == MutationCommand::Type::MATERIALIZE_COLUMN
-                || command.type == MutationCommand::Type::MATERIALIZE_STATISTIC
+            if (command.type == MutationCommand::Type::MATERIALIZE_COLUMN)
+            {
+                /// For ordinary column with default or materialized expression, MATERIALIZE COLUMN should not override past values
+                /// So we only mutate column if `command.column_name` is a default/materialized column or if the part does not have physical column file
+                auto column_ordinary = table_columns.getOrdinary().tryGetByName(command.column_name);
+                if (!column_ordinary || !part->tryGetColumn(command.column_name) || !part->hasColumnFiles(*column_ordinary))
+                    for_interpreter.push_back(command);
+            }
+            else if (command.type == MutationCommand::Type::MATERIALIZE_INDEX
+                || command.type == MutationCommand::Type::MATERIALIZE_STATISTICS
                 || command.type == MutationCommand::Type::MATERIALIZE_PROJECTION
                 || command.type == MutationCommand::Type::MATERIALIZE_TTL
                 || command.type == MutationCommand::Type::DELETE
@@ -209,7 +280,7 @@ static void splitAndModifyMutationCommands(
             }
             else if (command.type == MutationCommand::Type::DROP_INDEX
                      || command.type == MutationCommand::Type::DROP_PROJECTION
-                     || command.type == MutationCommand::Type::DROP_STATISTIC)
+                     || command.type == MutationCommand::Type::DROP_STATISTICS)
             {
                 for_file_renames.push_back(command);
             }
@@ -259,7 +330,6 @@ getColumnsForNewDataPart(
     ColumnsDescription part_columns(source_part->getColumns());
     NamesAndTypesList system_columns;
 
-    const auto & deleted_mask_column = LightweightDeleteDescription::FILTER_COLUMN;
     bool supports_lightweight_deletes = source_part->supportLightweightDeleteMutate();
 
     bool deleted_mask_updated = false;
@@ -275,9 +345,9 @@ getColumnsForNewDataPart(
         {
             for (const auto & [column_name, _] : command.column_to_update_expression)
             {
-                if (column_name == deleted_mask_column.name
+                if (column_name == RowExistsColumn::name
                     && supports_lightweight_deletes
-                    && !storage_columns_set.contains(deleted_mask_column.name))
+                    && !storage_columns_set.contains(RowExistsColumn::name))
                     deleted_mask_updated = true;
             }
         }
@@ -299,12 +369,23 @@ getColumnsForNewDataPart(
         }
     }
 
-    if (!storage_columns_set.contains(deleted_mask_column.name))
+    auto persistent_virtuals = source_part->storage.getVirtualsPtr()->getNamesAndTypesList(VirtualsKind::Persistent);
+
+    for (const auto & [name, type] : persistent_virtuals)
     {
-        if (deleted_mask_updated || (part_columns.has(deleted_mask_column.name) && !has_delete_command))
+        if (storage_columns_set.contains(name))
+            continue;
+
+        bool need_column = false;
+        if (name == RowExistsColumn::name)
+            need_column = deleted_mask_updated || (part_columns.has(name) && !has_delete_command);
+        else
+            need_column = part_columns.has(name);
+
+        if (need_column)
         {
-            storage_columns.push_back(deleted_mask_column);
-            storage_columns_set.insert(deleted_mask_column.name);
+            storage_columns.emplace_back(name, type);
+            storage_columns_set.insert(name);
         }
     }
 
@@ -462,16 +543,16 @@ static ExecuteTTLType shouldExecuteTTL(const StorageMetadataPtr & metadata_snaps
     return has_ttl_expression ? ExecuteTTLType::RECALCULATE : ExecuteTTLType::NONE;
 }
 
-static std::set<StatisticPtr> getStatisticsToRecalculate(const StorageMetadataPtr & metadata_snapshot, const NameSet & materialized_stats)
+static std::set<ColumnStatisticsPtr> getStatisticsToRecalculate(const StorageMetadataPtr & metadata_snapshot, const NameSet & materialized_stats)
 {
     const auto & stats_factory = MergeTreeStatisticsFactory::instance();
-    std::set<StatisticPtr> stats_to_recalc;
+    std::set<ColumnStatisticsPtr> stats_to_recalc;
     const auto & columns = metadata_snapshot->getColumns();
     for (const auto & col_desc : columns)
     {
-        if (col_desc.stat && materialized_stats.contains(col_desc.name))
+        if (!col_desc.statistics.empty() && materialized_stats.contains(col_desc.name))
         {
-            stats_to_recalc.insert(stats_factory.get(*col_desc.stat));
+            stats_to_recalc.insert(stats_factory.get(col_desc.statistics));
         }
     }
     return stats_to_recalc;
@@ -540,7 +621,9 @@ static std::set<ProjectionDescriptionRawPtr> getProjectionsToRecalculate(
     {
         bool need_recalculate =
             materialized_projections.contains(projection.name)
-            || (!is_full_part_storage && source_part->hasProjection(projection.name));
+            || (!is_full_part_storage
+                && source_part->hasProjection(projection.name)
+                && !source_part->hasBrokenProjection(projection.name));
 
         if (need_recalculate)
             projections_to_recalc.insert(&projection);
@@ -582,8 +665,8 @@ static NameSet collectFilesToSkip(
     const Block & updated_header,
     const std::set<MergeTreeIndexPtr> & indices_to_recalc,
     const String & mrk_extension,
-    const std::set<ProjectionDescriptionRawPtr> & projections_to_recalc,
-    const std::set<StatisticPtr> & stats_to_recalc)
+    const std::set<ProjectionDescriptionRawPtr> & projections_to_skip,
+    const std::set<ColumnStatisticsPtr> & stats_to_recalc)
 {
     NameSet files_to_skip = source_part->getFileNamesWithoutChecksums();
 
@@ -596,8 +679,8 @@ static NameSet collectFilesToSkip(
         files_to_skip.insert(index->getFileName() + index->getSerializedFileExtension());
         files_to_skip.insert(index->getFileName() + mrk_extension);
 
-        // Skip all inverted index files, for they will be rebuilt
-        if (dynamic_cast<const MergeTreeIndexInverted *>(index.get()))
+        // Skip all full-text index files, for they will be rebuilt
+        if (dynamic_cast<const MergeTreeIndexFullText *>(index.get()))
         {
             auto index_filename = index->getFileName();
             files_to_skip.insert(index_filename + ".gin_dict");
@@ -607,11 +690,11 @@ static NameSet collectFilesToSkip(
         }
     }
 
-    for (const auto & projection : projections_to_recalc)
+    for (const auto & projection : projections_to_skip)
         files_to_skip.insert(projection->getDirectoryName());
 
     for (const auto & stat : stats_to_recalc)
-        files_to_skip.insert(stat->getFileName() + STAT_FILE_SUFFIX);
+        files_to_skip.insert(stat->getFileName() + STATS_FILE_SUFFIX);
 
     if (isWidePart(source_part))
     {
@@ -674,15 +757,25 @@ static NameToNameVector collectFilesForRenames(
     {
         if (command.type == MutationCommand::Type::DROP_INDEX)
         {
-            if (source_part->checksums.has(INDEX_FILE_PREFIX + command.column_name + ".idx2"))
+            static const std::array<String, 2> suffixes = {".idx2", ".idx"};
+            static const std::array<String, 4> gin_suffixes = {".gin_dict", ".gin_post", ".gin_seg", ".gin_sid"}; /// .gin_* means generalized inverted index (aka. full-text-index)
+
+            for (const auto & suffix : suffixes)
             {
-                add_rename(INDEX_FILE_PREFIX + command.column_name + ".idx2", "");
-                add_rename(INDEX_FILE_PREFIX + command.column_name + mrk_extension, "");
+                const String filename = INDEX_FILE_PREFIX + command.column_name + suffix;
+                const String filename_mrk = INDEX_FILE_PREFIX + command.column_name + mrk_extension;
+
+                if (source_part->checksums.has(filename))
+                {
+                    add_rename(filename, "");
+                    add_rename(filename_mrk, "");
+                }
             }
-            else if (source_part->checksums.has(INDEX_FILE_PREFIX + command.column_name + ".idx"))
+            for (const auto & gin_suffix : gin_suffixes)
             {
-                add_rename(INDEX_FILE_PREFIX + command.column_name + ".idx", "");
-                add_rename(INDEX_FILE_PREFIX + command.column_name + mrk_extension, "");
+                const String filename = INDEX_FILE_PREFIX + command.column_name + gin_suffix;
+                if (source_part->checksums.has(filename))
+                    add_rename(filename, "");
             }
         }
         else if (command.type == MutationCommand::Type::DROP_PROJECTION)
@@ -690,11 +783,11 @@ static NameToNameVector collectFilesForRenames(
             if (source_part->checksums.has(command.column_name + ".proj"))
                 add_rename(command.column_name + ".proj", "");
         }
-        else if (command.type == MutationCommand::Type::DROP_STATISTIC)
+        else if (command.type == MutationCommand::Type::DROP_STATISTICS)
         {
-            for (const auto & statistic_column_name : command.statistic_columns)
-                if (source_part->checksums.has(STAT_FILE_PREFIX + statistic_column_name + STAT_FILE_SUFFIX))
-                    add_rename(STAT_FILE_PREFIX + statistic_column_name + STAT_FILE_SUFFIX, "");
+            for (const auto & statistics_column_name : command.statistics_columns)
+                if (source_part->checksums.has(STATS_FILE_PREFIX + statistics_column_name + STATS_FILE_SUFFIX))
+                    add_rename(STATS_FILE_PREFIX + statistics_column_name + STATS_FILE_SUFFIX, "");
         }
         else if (isWidePart(source_part))
         {
@@ -715,9 +808,9 @@ static NameToNameVector collectFilesForRenames(
                 if (auto serialization = source_part->tryGetSerialization(command.column_name))
                     serialization->enumerateStreams(callback);
 
-                /// if we drop a column with statistic, we should also drop the stat file.
-                if (source_part->checksums.has(STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX))
-                    add_rename(STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX, "");
+                /// if we drop a column with statistics, we should also drop the stat file.
+                if (source_part->checksums.has(STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX))
+                    add_rename(STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX, "");
             }
             else if (command.type == MutationCommand::Type::RENAME_COLUMN)
             {
@@ -751,9 +844,9 @@ static NameToNameVector collectFilesForRenames(
                 if (auto serialization = source_part->tryGetSerialization(command.column_name))
                     serialization->enumerateStreams(callback);
 
-                /// if we rename a column with statistic, we should also rename the stat file.
-                if (source_part->checksums.has(STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX))
-                    add_rename(STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX, STAT_FILE_PREFIX + command.rename_to + STAT_FILE_SUFFIX);
+                /// if we rename a column with statistics, we should also rename the stat file.
+                if (source_part->checksums.has(STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX))
+                    add_rename(STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX, STATS_FILE_PREFIX + command.rename_to + STATS_FILE_SUFFIX);
             }
             else if (command.type == MutationCommand::Type::READ_COLUMN)
             {
@@ -869,12 +962,13 @@ void finalizeMutatedPart(
 
     new_data_part->rows_count = source_part->rows_count;
     new_data_part->index_granularity = source_part->index_granularity;
-    new_data_part->index = source_part->index;
+    new_data_part->setIndex(*source_part->getIndex());
     new_data_part->minmax_idx = source_part->minmax_idx;
     new_data_part->modification_time = time(nullptr);
 
     /// Load rest projections which are hardlinked
-    new_data_part->loadProjections(false, false, true /* if_not_loaded */);
+    bool noop;
+    new_data_part->loadProjections(false, false, noop, true /* if_not_loaded */);
 
     /// All information about sizes is stored in checksums.
     /// It doesn't make sense to touch filesystem for sizes.
@@ -896,7 +990,7 @@ struct MutationContext
     TableLockHolder * holder;
     MergeListEntry * mutate_entry;
 
-    Poco::Logger * log{&Poco::Logger::get("MutateTask")};
+    LoggerPtr log{getLogger("MutateTask")};
 
     FutureMergedMutatedPartPtr future_part;
     MergeTreeData::DataPartPtr source_part;
@@ -913,13 +1007,13 @@ struct MutationContext
 
     QueryPipelineBuilder mutating_pipeline_builder;
     QueryPipeline mutating_pipeline; // in
-    std::unique_ptr<PullingPipelineExecutor> mutating_executor{nullptr};
+    std::unique_ptr<PullingPipelineExecutor> mutating_executor;
     ProgressCallback progress_callback;
     Block updated_header;
 
     std::unique_ptr<MutationsInterpreter> interpreter;
-    UInt64 watch_prev_elapsed{0};
-    std::unique_ptr<MergeStageProgress> stage_progress{nullptr};
+    UInt64 watch_prev_elapsed = 0;
+    std::unique_ptr<MergeStageProgress> stage_progress;
 
     MutationCommands commands_for_part;
     MutationCommands for_interpreter;
@@ -931,15 +1025,15 @@ struct MutationContext
     NameSet materialized_statistics;
 
     MergeTreeData::MutableDataPartPtr new_data_part;
-    IMergedBlockOutputStreamPtr out{nullptr};
+    IMergedBlockOutputStreamPtr out;
 
     String mrk_extension;
 
     std::vector<ProjectionDescriptionRawPtr> projections_to_build;
-    IMergeTreeDataPart::MinMaxIndexPtr minmax_idx{nullptr};
+    IMergeTreeDataPart::MinMaxIndexPtr minmax_idx;
 
     std::set<MergeTreeIndexPtr> indices_to_recalc;
-    std::set<StatisticPtr> stats_to_recalc;
+    std::set<ColumnStatisticsPtr> stats_to_recalc;
     std::set<ProjectionDescriptionRawPtr> projections_to_recalc;
     MergeTreeData::DataPart::Checksums existing_indices_stats_checksums;
     NameSet files_to_skip;
@@ -955,6 +1049,10 @@ struct MutationContext
     bool need_prefix = true;
 
     scope_guard temporary_directory_lock;
+
+    /// Whether we need to count lightweight delete rows in this mutation
+    bool count_lightweight_deleted_rows;
+    UInt64 execute_elapsed_ns = 0;
 };
 
 using MutationContextPtr = std::shared_ptr<MutationContext>;
@@ -975,7 +1073,7 @@ public:
         , projection(projection_)
         , block_num(block_num_)
         , ctx(ctx_)
-        , log(&Poco::Logger::get("MergeProjectionPartsTask"))
+        , log(getLogger("MergeProjectionPartsTask"))
         {
             LOG_DEBUG(log, "Selected {} projection_parts from {} to {}", parts.size(), parts.front()->name, parts.back()->name);
             level_parts[current_level] = std::move(parts);
@@ -1079,7 +1177,7 @@ private:
     size_t & block_num;
     MutationContextPtr ctx;
 
-    Poco::Logger * log;
+    LoggerPtr log;
 
     std::map<size_t, MergeTreeData::MutableDataPartsVector> level_parts;
     size_t current_level = 0;
@@ -1149,6 +1247,7 @@ public:
             }
             case State::SUCCESS:
             {
+                finalize();
                 return false;
             }
         }
@@ -1162,7 +1261,7 @@ private:
     void constructTaskForProjectionPartsMerge();
     void finalize();
 
-    enum class State
+    enum class State : uint8_t
     {
         NEED_PREPARE,
         NEED_MUTATE_ORIGINAL_PART,
@@ -1180,10 +1279,15 @@ private:
     ProjectionNameToItsBlocks projection_parts;
     std::move_iterator<ProjectionNameToItsBlocks::iterator> projection_parts_iterator;
 
-    std::vector<SquashingTransform> projection_squashes;
+    std::vector<Squashing> projection_squashes;
     const ProjectionsDescription & projections;
 
     ExecutableTaskPtr merge_projection_parts_task_ptr;
+
+    /// Existing rows count calculated during part writing.
+    /// It is initialized in prepare(), calculated in mutateOriginalPartAndPrepareProjections()
+    /// and set to new_data_part in finalize()
+    size_t existing_rows_count;
 };
 
 
@@ -1193,36 +1297,43 @@ void PartMergerWriter::prepare()
 
     for (size_t i = 0, size = ctx->projections_to_build.size(); i < size; ++i)
     {
-        // If the parent part is an in-memory part, squash projection output into one block and
-        // build in-memory projection because we don't support merging into a new in-memory part.
-        // Otherwise we split the materialization into multiple stages similar to the process of
-        // INSERT SELECT query.
-        if (ctx->new_data_part->getType() == MergeTreeDataPartType::InMemory)
-            projection_squashes.emplace_back(0, 0);
-        else
-            projection_squashes.emplace_back(settings.min_insert_block_size_rows, settings.min_insert_block_size_bytes);
+        // We split the materialization into multiple stages similar to the process of INSERT SELECT query.
+        projection_squashes.emplace_back(ctx->updated_header, settings.min_insert_block_size_rows, settings.min_insert_block_size_bytes);
     }
+
+    existing_rows_count = 0;
 }
 
 
 bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
 {
     Block cur_block;
+    Block projection_header;
     if (MutationHelpers::checkOperationIsNotCanceled(*ctx->merges_blocker, ctx->mutate_entry) && ctx->mutating_executor->pull(cur_block))
     {
         if (ctx->minmax_idx)
-            ctx->minmax_idx->update(cur_block, ctx->data->getMinMaxColumnsNames(ctx->metadata_snapshot->getPartitionKey()));
+            ctx->minmax_idx->update(cur_block, MergeTreeData::getMinMaxColumnsNames(ctx->metadata_snapshot->getPartitionKey()));
 
         ctx->out->write(cur_block);
+
+        /// TODO: move this calculation to DELETE FROM mutation
+        if (ctx->count_lightweight_deleted_rows)
+            existing_rows_count += MutationHelpers::getExistingRowsCount(cur_block);
 
         for (size_t i = 0, size = ctx->projections_to_build.size(); i < size; ++i)
         {
             const auto & projection = *ctx->projections_to_build[i];
-            auto projection_block = projection_squashes[i].add(projection.calculate(cur_block, ctx->context));
-            if (projection_block)
+
+            ProfileEventTimeIncrement<Microseconds> watch(ProfileEvents::MutateTaskProjectionsCalculationMicroseconds);
+            Block block_to_squash = projection.calculate(cur_block, ctx->context);
+            projection_squashes[i].setHeader(block_to_squash.cloneEmpty());
+
+            Chunk squashed_chunk = Squashing::squash(projection_squashes[i].add({block_to_squash.getColumns(), block_to_squash.rows()}));
+            if (squashed_chunk)
             {
+                auto result = projection_squashes[i].getHeader().cloneWithColumns(squashed_chunk.detachColumns());
                 auto tmp_part = MergeTreeDataWriter::writeTempProjectionPart(
-                    *ctx->data, ctx->log, projection_block, projection, ctx->new_data_part.get(), ++block_num);
+                    *ctx->data, ctx->log, result, projection, ctx->new_data_part.get(), ++block_num);
                 tmp_part.finalize();
                 tmp_part.part->getDataPartStorage().commitTransaction();
                 projection_parts[projection.name].emplace_back(std::move(tmp_part.part));
@@ -1240,12 +1351,13 @@ bool PartMergerWriter::mutateOriginalPartAndPrepareProjections()
     for (size_t i = 0, size = ctx->projections_to_build.size(); i < size; ++i)
     {
         const auto & projection = *ctx->projections_to_build[i];
-        auto & projection_squash = projection_squashes[i];
-        auto projection_block = projection_squash.add({});
-        if (projection_block)
+        auto & projection_squash_plan = projection_squashes[i];
+        auto squashed_chunk = Squashing::squash(projection_squash_plan.flush());
+        if (squashed_chunk)
         {
+            auto result = projection_squash_plan.getHeader().cloneWithColumns(squashed_chunk.detachColumns());
             auto temp_part = MergeTreeDataWriter::writeTempProjectionPart(
-                *ctx->data, ctx->log, projection_block, projection, ctx->new_data_part.get(), ++block_num);
+                *ctx->data, ctx->log, result, projection, ctx->new_data_part.get(), ++block_num);
             temp_part.finalize();
             temp_part.part->getDataPartStorage().commitTransaction();
             projection_parts[projection.name].emplace_back(std::move(temp_part.part));
@@ -1296,6 +1408,12 @@ bool PartMergerWriter::iterateThroughAllProjections()
     constructTaskForProjectionPartsMerge();
 
     return true;
+}
+
+void PartMergerWriter::finalize()
+{
+    if (ctx->count_lightweight_deleted_rows)
+        ctx->new_data_part->existing_rows_count = existing_rows_count;
 }
 
 class MutateAllPartColumnsTask : public IExecutableTask
@@ -1369,12 +1487,12 @@ private:
         {
             if (command.type == MutationCommand::DROP_INDEX)
                 removed_indices.insert(command.column_name);
-            else if (command.type == MutationCommand::DROP_STATISTIC)
-                for (const auto & column_name : command.statistic_columns)
+            else if (command.type == MutationCommand::DROP_STATISTICS)
+                for (const auto & column_name : command.statistics_columns)
                     removed_stats.insert(column_name);
             else if (command.type == MutationCommand::RENAME_COLUMN
-                     && ctx->source_part->checksums.files.contains(STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX))
-                renamed_stats[STAT_FILE_PREFIX + command.column_name + STAT_FILE_SUFFIX] = STAT_FILE_PREFIX + command.rename_to + STAT_FILE_SUFFIX;
+                     && ctx->source_part->checksums.files.contains(STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX))
+                renamed_stats[STATS_FILE_PREFIX + command.column_name + STATS_FILE_SUFFIX] = STATS_FILE_PREFIX + command.rename_to + STATS_FILE_SUFFIX;
         }
 
         bool is_full_part_storage = isFullPartStorage(ctx->new_data_part->getDataPartStorage());
@@ -1410,23 +1528,23 @@ private:
             }
         }
 
-        Statistics stats_to_rewrite;
+        ColumnsStatistics stats_to_rewrite;
         const auto & columns = ctx->metadata_snapshot->getColumns();
         for (const auto & col : columns)
         {
-            if (!col.stat || removed_stats.contains(col.name))
+            if (col.statistics.empty() || removed_stats.contains(col.name))
                 continue;
 
             if (ctx->materialized_statistics.contains(col.name))
             {
-                stats_to_rewrite.push_back(MergeTreeStatisticsFactory::instance().get(*col.stat));
+                stats_to_rewrite.push_back(MergeTreeStatisticsFactory::instance().get(col.statistics));
             }
             else
             {
                 /// We do not hard-link statistics which
-                /// 1. In `DROP STATISTIC` statement. It is filtered by `removed_stats`
+                /// 1. In `DROP STATISTICS` statement. It is filtered by `removed_stats`
                 /// 2. Not in column list anymore, including `DROP COLUMN`. It is not touched by this loop.
-                String stat_file_name = STAT_FILE_PREFIX + col.name + STAT_FILE_SUFFIX;
+                String stat_file_name = STATS_FILE_PREFIX + col.name + STATS_FILE_SUFFIX;
                 auto it = ctx->source_part->checksums.files.find(stat_file_name);
                 if (it != ctx->source_part->checksums.files.end())
                 {
@@ -1443,6 +1561,10 @@ private:
                 removed_projections.insert(command.column_name);
         }
 
+        bool lightweight_delete_mode = ctx->updated_header.has(RowExistsColumn::name);
+        bool lightweight_delete_drop = lightweight_delete_mode
+            && ctx->data->getSettings()->lightweight_mutation_projection_mode == LightweightMutationProjectionMode::DROP;
+
         const auto & projections = ctx->metadata_snapshot->getProjections();
         for (const auto & projection : projections)
         {
@@ -1450,8 +1572,11 @@ private:
                 continue;
 
             bool need_recalculate =
-                ctx->materialized_projections.contains(projection.name)
-                || (!is_full_part_storage && ctx->source_part->hasProjection(projection.name));
+                (ctx->materialized_projections.contains(projection.name)
+                || (!is_full_part_storage
+                    && ctx->source_part->hasProjection(projection.name)
+                    && !ctx->source_part->hasBrokenProjection(projection.name)))
+                && !lightweight_delete_drop;
 
             if (need_recalculate)
             {
@@ -1459,7 +1584,7 @@ private:
             }
             else
             {
-                if (ctx->source_part->checksums.has(projection.getDirectoryName()))
+                if (!lightweight_delete_mode && ctx->source_part->checksums.has(projection.getDirectoryName()))
                     entries_to_hardlink.insert(projection.getDirectoryName());
             }
         }
@@ -1515,21 +1640,34 @@ private:
         if (!ctx->mutating_pipeline_builder.initialized())
             throw Exception(ErrorCodes::LOGICAL_ERROR, "Cannot mutate part columns with uninitialized mutations stream. It's a bug");
 
-        QueryPipelineBuilder builder(std::move(ctx->mutating_pipeline_builder));
+        auto builder = std::make_unique<QueryPipelineBuilder>(std::move(ctx->mutating_pipeline_builder));
 
         if (ctx->metadata_snapshot->hasPrimaryKey() || ctx->metadata_snapshot->hasSecondaryIndices())
         {
-            builder.addTransform(std::make_shared<ExpressionTransform>(
-                builder.getHeader(), ctx->data->getPrimaryKeyAndSkipIndicesExpression(ctx->metadata_snapshot, skip_indices)));
+            builder->addTransform(std::make_shared<ExpressionTransform>(
+                builder->getHeader(), ctx->data->getPrimaryKeyAndSkipIndicesExpression(ctx->metadata_snapshot, skip_indices)));
 
-            builder.addTransform(std::make_shared<MaterializingTransform>(builder.getHeader()));
+            builder->addTransform(std::make_shared<MaterializingTransform>(builder->getHeader()));
         }
 
+        PreparedSets::Subqueries subqueries;
+
         if (ctx->execute_ttl_type == ExecuteTTLType::NORMAL)
-            builder.addTransform(std::make_shared<TTLTransform>(builder.getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true));
+        {
+            auto transform = std::make_shared<TTLTransform>(ctx->context, builder->getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true);
+            subqueries = transform->getSubqueries();
+            builder->addTransform(std::move(transform));
+        }
 
         if (ctx->execute_ttl_type == ExecuteTTLType::RECALCULATE)
-            builder.addTransform(std::make_shared<TTLCalcTransform>(builder.getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true));
+        {
+            auto transform = std::make_shared<TTLCalcTransform>(ctx->context, builder->getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true);
+            subqueries = transform->getSubqueries();
+            builder->addTransform(std::move(transform));
+        }
+
+        if (!subqueries.empty())
+            builder = addCreatingSetsTransform(std::move(builder), std::move(subqueries), ctx->context);
 
         ctx->minmax_idx = std::make_shared<IMergeTreeDataPart::MinMaxIndex>();
 
@@ -1557,13 +1695,13 @@ private:
             skip_indices,
             stats_to_rewrite,
             ctx->compression_codec,
-            ctx->txn,
+            ctx->txn ? ctx->txn->tid : Tx::PrehistoricTID,
             /*reset_columns=*/ true,
             /*blocks_are_granules_size=*/ false,
             ctx->context->getWriteSettings(),
             computed_granularity);
 
-        ctx->mutating_pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
+        ctx->mutating_pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
         ctx->mutating_pipeline.setProgressCallback(ctx->progress_callback);
         /// Is calculated inside MergeProgressCallback.
         ctx->mutating_pipeline.disableProfileEventUpdate();
@@ -1575,8 +1713,9 @@ private:
 
     void finalize()
     {
+        bool noop;
         ctx->new_data_part->minmax_idx = std::move(ctx->minmax_idx);
-        ctx->new_data_part->loadProjections(false, false, true /* if_not_loaded */);
+        ctx->new_data_part->loadProjections(false, false, noop, true /* if_not_loaded */);
         ctx->mutating_executor.reset();
         ctx->mutating_pipeline.reset();
 
@@ -1585,7 +1724,7 @@ private:
         ctx->out.reset();
     }
 
-    enum class State
+    enum class State : uint8_t
     {
         NEED_PREPARE,
         NEED_EXECUTE,
@@ -1758,27 +1897,39 @@ private:
 
         if (ctx->mutating_pipeline_builder.initialized())
         {
-            QueryPipelineBuilder builder(std::move(ctx->mutating_pipeline_builder));
+            auto builder = std::make_unique<QueryPipelineBuilder>(std::move(ctx->mutating_pipeline_builder));
+            PreparedSets::Subqueries subqueries;
 
             if (ctx->execute_ttl_type == ExecuteTTLType::NORMAL)
-                builder.addTransform(std::make_shared<TTLTransform>(builder.getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true));
+            {
+                auto transform = std::make_shared<TTLTransform>(ctx->context, builder->getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true);
+                subqueries = transform->getSubqueries();
+                builder->addTransform(std::move(transform));
+            }
 
             if (ctx->execute_ttl_type == ExecuteTTLType::RECALCULATE)
-                builder.addTransform(std::make_shared<TTLCalcTransform>(builder.getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true));
+            {
+                auto transform = std::make_shared<TTLCalcTransform>(ctx->context, builder->getHeader(), *ctx->data, ctx->metadata_snapshot, ctx->new_data_part, ctx->time_of_mutation, true);
+                subqueries = transform->getSubqueries();
+                builder->addTransform(std::move(transform));
+            }
+
+            if (!subqueries.empty())
+                builder = addCreatingSetsTransform(std::move(builder), std::move(subqueries), ctx->context);
 
             ctx->out = std::make_shared<MergedColumnOnlyOutputStream>(
                 ctx->new_data_part,
                 ctx->metadata_snapshot,
-                ctx->updated_header,
+                ctx->updated_header.getNamesAndTypesList(),
                 ctx->compression_codec,
                 std::vector<MergeTreeIndexPtr>(ctx->indices_to_recalc.begin(), ctx->indices_to_recalc.end()),
-                Statistics(ctx->stats_to_recalc.begin(), ctx->stats_to_recalc.end()),
+                ColumnsStatistics(ctx->stats_to_recalc.begin(), ctx->stats_to_recalc.end()),
                 nullptr,
                 ctx->source_part->index_granularity,
                 &ctx->source_part->index_granularity_info
             );
 
-            ctx->mutating_pipeline = QueryPipelineBuilder::getPipeline(std::move(builder));
+            ctx->mutating_pipeline = QueryPipelineBuilder::getPipeline(std::move(*builder));
             ctx->mutating_pipeline.setProgressCallback(ctx->progress_callback);
             /// Is calculated inside MergeProgressCallback.
             ctx->mutating_pipeline.disableProfileEventUpdate();
@@ -1822,8 +1973,7 @@ private:
         MutationHelpers::finalizeMutatedPart(ctx->source_part, ctx->new_data_part, ctx->execute_ttl_type, ctx->compression_codec, ctx->context, ctx->metadata_snapshot, ctx->need_sync);
     }
 
-
-    enum class State
+    enum class State : uint8_t
     {
         NEED_PREPARE,
         NEED_EXECUTE,
@@ -1879,6 +2029,9 @@ MutateTask::MutateTask(
 
 bool MutateTask::execute()
 {
+    Stopwatch watch;
+    SCOPE_EXIT({ ctx->execute_elapsed_ns += watch.elapsedNanoseconds(); });
+
     switch (state)
     {
         case State::NEED_PREPARE:
@@ -1912,6 +2065,15 @@ bool MutateTask::execute()
     return false;
 }
 
+void MutateTask::updateProfileEvents() const
+{
+    UInt64 total_elapsed_ms = (*ctx->mutate_entry)->watch.elapsedMilliseconds();
+    UInt64 execute_elapsed_ms = ctx->execute_elapsed_ns / 1000000UL;
+
+    ProfileEvents::increment(ProfileEvents::MutationTotalMilliseconds, total_elapsed_ms);
+    ProfileEvents::increment(ProfileEvents::MutationExecuteMilliseconds, execute_elapsed_ms);
+}
+
 static bool canSkipConversionToNullable(const MergeTreeDataPartPtr & part, const MutationCommand & command)
 {
     if (command.type != MutationCommand::READ_COLUMN)
@@ -1921,7 +2083,7 @@ static bool canSkipConversionToNullable(const MergeTreeDataPartPtr & part, const
     if (!part_column)
         return false;
 
-    /// For ALTER MODIFY COLUMN from 'Type' to 'Nullable(Type)' we can skip mutatation and
+    /// For ALTER MODIFY COLUMN from 'Type' to 'Nullable(Type)' we can skip mutation and
     /// apply only metadata conversion. But it doesn't work for custom serialization.
     const auto * to_nullable = typeid_cast<const DataTypeNullable *>(command.data_type.get());
     if (!to_nullable)
@@ -1935,6 +2097,20 @@ static bool canSkipConversionToNullable(const MergeTreeDataPartPtr & part, const
         return false;
 
     return true;
+}
+
+static bool canSkipConversionToVariant(const MergeTreeDataPartPtr & part, const MutationCommand & command)
+{
+    if (command.type != MutationCommand::READ_COLUMN)
+        return false;
+
+    auto part_column = part->tryGetColumn(command.column_name);
+    if (!part_column)
+        return false;
+
+    /// For ALTER MODIFY COLUMN with Variant extension (like 'Variant(T1, T2)' to 'Variant(T1, T2, T3, ...)')
+    /// we can skip mutation and apply only metadata conversion.
+    return isVariantExtension(part_column->type, command.data_type);
 }
 
 static bool canSkipMutationCommandForPart(const MergeTreeDataPartPtr & part, const MutationCommand & command, const ContextPtr & context)
@@ -1952,11 +2128,15 @@ static bool canSkipMutationCommandForPart(const MergeTreeDataPartPtr & part, con
     if (canSkipConversionToNullable(part, command))
         return true;
 
+    if (canSkipConversionToVariant(part, command))
+        return true;
+
     return false;
 }
 
 bool MutateTask::prepare()
 {
+    ProfileEvents::increment(ProfileEvents::MutationTotalParts);
     MutationHelpers::checkOperationIsNotCanceled(*ctx->merges_blocker, ctx->mutate_entry);
 
     if (ctx->future_part->parts.size() != 1)
@@ -1979,7 +2159,7 @@ bool MutateTask::prepare()
             ctx->commands_for_part.emplace_back(command);
 
     if (ctx->source_part->isStoredOnDisk() && !isStorageTouchedByMutations(
-        *ctx->data, ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
+        ctx->source_part, ctx->metadata_snapshot, ctx->commands_for_part, context_for_reading))
     {
         NameSet files_to_copy_instead_of_hardlinks;
         auto settings_ptr = ctx->data->getSettings();
@@ -2013,12 +2193,13 @@ bool MutateTask::prepare()
         scope_guard lock;
 
         {
-            std::tie(part, lock) = ctx->data->cloneAndLoadDataPartOnSameDisk(
-                ctx->source_part, prefix, ctx->future_part->part_info, ctx->metadata_snapshot, clone_params, ctx->context->getReadSettings(), ctx->context->getWriteSettings());
+            std::tie(part, lock) = ctx->data->cloneAndLoadDataPart(
+                ctx->source_part, prefix, ctx->future_part->part_info, ctx->metadata_snapshot, clone_params, ctx->context->getReadSettings(), ctx->context->getWriteSettings(), true/*must_on_same_disk*/);
             part->getDataPartStorage().beginTransaction();
             ctx->temporary_directory_lock = std::move(lock);
         }
 
+        ProfileEvents::increment(ProfileEvents::MutationUntouchedParts);
         promise.set_value(std::move(part));
         return false;
     }
@@ -2043,6 +2224,8 @@ bool MutateTask::prepare()
 
     ctx->stage_progress = std::make_unique<MergeStageProgress>(1.0);
 
+    bool lightweight_delete_mode = false;
+
     if (!ctx->for_interpreter.empty())
     {
         /// Always disable filtering in mutations: we want to read and write all rows because for updates we rewrite only some of the
@@ -2060,6 +2243,21 @@ bool MutateTask::prepare()
         ctx->mutating_pipeline_builder = ctx->interpreter->execute();
         ctx->updated_header = ctx->interpreter->getUpdatedHeader();
         ctx->progress_callback = MergeProgressCallback((*ctx->mutate_entry)->ptr(), ctx->watch_prev_elapsed, *ctx->stage_progress);
+
+        lightweight_delete_mode = ctx->updated_header.has(RowExistsColumn::name);
+        /// If under the condition of lightweight delete mode with rebuild option, add projections again here as we can only know
+        /// the condition as early as from here.
+        if (lightweight_delete_mode
+            && ctx->data->getSettings()->lightweight_mutation_projection_mode == LightweightMutationProjectionMode::REBUILD)
+        {
+            for (const auto & projection : ctx->metadata_snapshot->getProjections())
+            {
+                if (!ctx->source_part->hasProjection(projection.name))
+                    continue;
+
+                ctx->materialized_projections.insert(projection.name);
+            }
+        }
     }
 
     auto single_disk_volume = std::make_shared<SingleDiskVolume>("volume_" + ctx->future_part->name, ctx->space_reservation->getDisk(), 0);
@@ -2101,9 +2299,25 @@ bool MutateTask::prepare()
     if (ctx->mutating_pipeline_builder.initialized())
         ctx->execute_ttl_type = MutationHelpers::shouldExecuteTTL(ctx->metadata_snapshot, ctx->interpreter->getColumnDependencies());
 
+    if (ctx->data->getSettings()->exclude_deleted_rows_for_part_size_in_merge && lightweight_delete_mode)
+    {
+        /// This mutation contains lightweight delete and we need to count the deleted rows,
+        /// Reset existing_rows_count of new data part to 0 and it will be updated while writing _row_exists column
+        ctx->count_lightweight_deleted_rows = true;
+    }
+    else
+    {
+        ctx->count_lightweight_deleted_rows = false;
+
+        /// No need to count deleted rows, copy existing_rows_count from source part
+        ctx->new_data_part->existing_rows_count = ctx->source_part->existing_rows_count.value_or(ctx->source_part->rows_count);
+    }
+
     /// All columns from part are changed and may be some more that were missing before in part
     /// TODO We can materialize compact part without copying data
-    if (!isWidePart(ctx->source_part) || !isFullPartStorage(ctx->source_part->getDataPartStorage())
+    /// Also currently mutations of types with dynamic subcolumns in Wide part are possible only by
+    /// rewriting the whole part.
+    if (MutationHelpers::haveMutationsOfDynamicColumns(ctx->source_part, ctx->commands_for_part) || !isWidePart(ctx->source_part) || !isFullPartStorage(ctx->source_part->getDataPartStorage())
         || (ctx->interpreter && ctx->interpreter->isAffectingAllColumns()))
     {
         /// In case of replicated merge tree with zero copy replication
@@ -2112,6 +2326,7 @@ bool MutateTask::prepare()
         ctx->new_data_part->remove_tmp_policy = IMergeTreeDataPart::BlobsRemovalPolicyForTemporaryParts::REMOVE_BLOBS;
 
         task = std::make_unique<MutateAllPartColumnsTask>(ctx);
+        ProfileEvents::increment(ProfileEvents::MutationAllPartColumns);
     }
     else /// TODO: check that we modify only non-key columns in this case.
     {
@@ -2122,10 +2337,30 @@ bool MutateTask::prepare()
             ctx->context,
             ctx->materialized_indices);
 
-        ctx->projections_to_recalc = MutationHelpers::getProjectionsToRecalculate(
-            ctx->source_part,
-            ctx->metadata_snapshot,
-            ctx->materialized_projections);
+        auto lightweight_mutation_projection_mode = ctx->data->getSettings()->lightweight_mutation_projection_mode;
+        bool lightweight_delete_drops_projections =
+            lightweight_mutation_projection_mode == LightweightMutationProjectionMode::DROP
+            || lightweight_mutation_projection_mode == LightweightMutationProjectionMode::THROW;
+
+        std::set<ProjectionDescriptionRawPtr> projections_to_skip_container;
+        auto * projections_to_skip = &projections_to_skip_container;
+
+        bool should_create_projections = !(lightweight_delete_mode && lightweight_delete_drops_projections);
+        /// Under lightweight delete mode, if option is drop, projections_to_recalc should be empty.
+        if (should_create_projections)
+        {
+            ctx->projections_to_recalc = MutationHelpers::getProjectionsToRecalculate(
+                ctx->source_part,
+                ctx->metadata_snapshot,
+                ctx->materialized_projections);
+
+            projections_to_skip = &ctx->projections_to_recalc;
+        }
+        else
+        {
+            for (const auto & projection : ctx->metadata_snapshot->getProjections())
+                projections_to_skip->insert(&projection);
+        }
 
         ctx->stats_to_recalc = MutationHelpers::getStatisticsToRecalculate(ctx->metadata_snapshot, ctx->materialized_statistics);
 
@@ -2135,7 +2370,7 @@ bool MutateTask::prepare()
             ctx->updated_header,
             ctx->indices_to_recalc,
             ctx->mrk_extension,
-            ctx->projections_to_recalc,
+            *projections_to_skip,
             ctx->stats_to_recalc);
 
         ctx->files_to_rename = MutationHelpers::collectFilesForRenames(
@@ -2151,6 +2386,7 @@ bool MutateTask::prepare()
         ctx->new_data_part->remove_tmp_policy = IMergeTreeDataPart::BlobsRemovalPolicyForTemporaryParts::ASK_KEEPER;
 
         task = std::make_unique<MutateSomePartColumnsTask>(ctx);
+        ProfileEvents::increment(ProfileEvents::MutationSomePartColumns);
     }
 
     return true;

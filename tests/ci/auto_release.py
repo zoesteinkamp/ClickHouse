@@ -139,11 +139,11 @@ def _prepare(token):
             )
             commit_num -= 1
 
-            is_completed = CI.GH.check_wf_completed(token=token, commit_sha=commit)
-            if not is_completed:
-                print(f"CI is in progress for [{commit}] - check previous commit")
-                commits_to_branch_head += 1
-                continue
+            # is_completed = CI.GH.check_wf_completed(token=token, commit_sha=commit)
+            # if not is_completed:
+            #     print(f"CI is in progress for [{commit}] - check previous commit")
+            #     commits_to_branch_head += 1
+            #     continue
 
             # TODO: switch to check if CI is entirely green
             statuses = [

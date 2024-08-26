@@ -1,6 +1,8 @@
 #include <memory>
 #include <sstream>
 #include <Server/ACMEClient.h>
+#include "Common/ZooKeeper/ZooKeeperLock.h"
+#include "Core/ServerUUID.h"
 
 #if USE_SSL
 #include <Core/BackgroundSchedulePool.h>
@@ -207,9 +209,12 @@ void ACMEClient::requestCertificate(const Poco::Util::AbstractConfiguration &)
     /// TODO
 }
 
-void ACMEClient::reload(const Poco::Util::AbstractConfiguration & config)
+void ACMEClient::initialize(const Poco::Util::AbstractConfiguration & config)
 try
 {
+    if (initialized)
+        return;
+
     auto http_port = config.getInt("http_port");
     if (http_port != 80 && !initialized)
         LOG_WARNING(log, "For ACME HTTP challenge HTTP port must be 80, but is {}", http_port);
@@ -231,28 +236,42 @@ try
     connection_timeout_settings = ConnectionTimeouts();
     proxy_configuration = ProxyConfiguration();
 
-    auto context = Context::getGlobalContextInstance();
-    auto zk = context->getZooKeeper();
-    zk->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH), "");
+    keeper_dispatcher = Context::getGlobalContextInstance()->getZooKeeper();
+    keeper_dispatcher->get()->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH), "");
 
     BackgroundSchedulePool & bgpool = context->getSchedulePool();
 
+    lock = createSimpleZooKeeperLock(zk, ZOOKEEPER_ACME_BASE_PATH, "leader", "ACME lock", /*throw_if_lost*/true);
 
-    auto do_election = [this, zk] {
-        LOG_DEBUG(log, "Running election task");
+    // auto do_election = [this, zk] {
+    //     LOG_DEBUG(log, "Running election task");
+    //
+    //     election_task->scheduleAfter(1000);
+    //
+    //     lock->tryLock();
+    //
+    //     LOG_DEBUG(log, "I'm the leader: {}", leader_node ? "yes" : "no");
+    //
+    //     /// TODO what if key changes?
+    //     handleKeyCreation();
+    // };
+    // election_task = bgpool.createTask("ACMEClient", do_election);
+    // election_task->activate();
 
-        election_task->scheduleAfter(1000);
+    // do_election();
 
-        /// fixme no throwing in BgSchPool
-        auto leader = zkutil::EphemeralNodeHolder::tryCreate(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "leader", *zk);
-        if (leader)
-            leader_node = std::move(leader);
-
-        LOG_DEBUG(log, "I'm the leader: {}", leader_node ? "yes" : "no");
-
-        /// TODO what if key changes?
-        if (leader_node && !private_acme_key)
+    refresh_key_task = bgpool.createTask(
+        "ACMEClient",
+        [this]
         {
+            LOG_DEBUG(log, "Running ACMEClient key refresh task");
+
+            if (private_acme_key)
+                return;
+
+            auto context = Context::getGlobalContextInstance();
+            auto zk = context->getZooKeeper();
+
             Coordination::Stat private_key_stat;
             std::string private_key;
 
@@ -262,32 +281,42 @@ try
                 LOG_DEBUG(log, "Generating new RSA private key for ACME account");
                 private_key = generatePrivateKeyInPEM();
 
-                /// TODO handle exception
-                zk->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "account_private_key", private_key);
+                try
+                {
+                    /// TODO handle exception
+                    if (!lock->tryLock())
+                    {
+                        LOG_DEBUG(log, "Failed to acquire lock for ACME key generation");
+                        refresh_key_task->scheduleAfter(1000);
+                        return;
+                    }
+
+                    /// TODO handle exception
+                    zk->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "account_private_key", private_key);
+                }
+                catch (...)
+                {
+                    refresh_key_task->scheduleAfter(1000);
+                    tryLogCurrentException("Failed to create private key");
+                }
             }
 
             chassert(!private_key.empty());
 
             std::istringstream private_key_stream(private_key);  // STYLE_CHECK_ALLOW_STD_STRING_STREAM
             private_acme_key = std::make_shared<Poco::Crypto::RSAKey>(nullptr, &private_key_stream, "");
-        }
 
-    };
-    election_task = bgpool.createTask("ACMEClient", do_election);
-    election_task->activate();
-
-    do_election();
-
-    refresh_task = bgpool.createTask(
-        "ACMEClient",
-        [this]
-        {
-            LOG_DEBUG(log, "Running ACMEClient task");
-
-            refresh_task->scheduleAfter(1000);
+            try{
+                authenticate();
+            }
+            catch(...)
+            {
+                refresh_key_task->scheduleAfter(1000);
+                tryLogCurrentException("Failed to authenticate");
+            }
         });
 
-    refresh_task->activateAndSchedule();
+    refresh_key_task->activateAndSchedule();
 
 
     if (!initialized)
@@ -297,6 +326,7 @@ try
 
         if (!authenticated)
         {
+            /// wait for key creation
             authenticate();
             authenticated = true;
         }

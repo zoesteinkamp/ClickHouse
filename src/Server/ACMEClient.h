@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Common/ZooKeeper/ZooKeeperLock.h"
+#include "Coordination/KeeperDispatcher.h"
 #include "config.h"
 
 #if USE_SSL
@@ -79,6 +81,7 @@ class ACMEClient : private boost::noncopyable
 public:
     static ACMEClient & instance();
 
+    void initialize(const Poco::Util::AbstractConfiguration & config);
     void reload(const Poco::Util::AbstractConfiguration & config);
     std::string requestChallenge(const std::string & uri);
 
@@ -107,9 +110,10 @@ private:
     DirectoryPtr directory;
 
     BackgroundSchedulePoolTaskHolder election_task;
-    BackgroundSchedulePoolTaskHolder refresh_task;
+    BackgroundSchedulePoolTaskHolder refresh_key_task;
 
-    zkutil::EphemeralNodeHolderPtr leader_node;
+    std::shared_ptr<KeeperDispatcher> keeper_dispatcher;
+    std::shared_ptr<zkutil::ZooKeeperLock> lock;
 
     std::vector<std::string> domains;
 

@@ -34,7 +34,7 @@ namespace DB
 class CertificateReloader
 {
 public:
-    using stat_t = struct stat;
+    // using stat_t = struct stat;
 
     struct Data
     {

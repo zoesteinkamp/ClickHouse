@@ -1,8 +1,8 @@
 #pragma once
 
-#include "Common/ZooKeeper/ZooKeeperLock.h"
-#include "Coordination/KeeperDispatcher.h"
 #include "config.h"
+
+#include <Common/ZooKeeper/ZooKeeperLock.h>
 
 #if USE_SSL
 #include <boost/core/noncopyable.hpp>
@@ -109,10 +109,10 @@ private:
 
     DirectoryPtr directory;
 
-    BackgroundSchedulePoolTaskHolder election_task;
+    BackgroundSchedulePoolTaskHolder authentication_task;
     BackgroundSchedulePoolTaskHolder refresh_key_task;
 
-    std::shared_ptr<KeeperDispatcher> keeper_dispatcher;
+    zkutil::ZooKeeperPtr zookeeper;
     std::shared_ptr<zkutil::ZooKeeperLock> lock;
 
     std::vector<std::string> domains;

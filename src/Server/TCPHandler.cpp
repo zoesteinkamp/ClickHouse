@@ -35,6 +35,7 @@
 #include <Poco/Net/NetException.h>
 #include <Poco/Net/SocketAddress.h>
 #include <Poco/Util/LayeredConfiguration.h>
+#include "Common/StackTrace.h"
 #include <Common/Exception.h>
 #include <Common/CurrentMetrics.h>
 #include <Common/CurrentThread.h>
@@ -596,11 +597,7 @@ void TCPHandler::runImpl()
             auto finish_or_cancel = [this]()
             {
                 if (state.cancellation_status == CancellationStatus::FULLY_CANCELLED)
-                {
                     state.io.onCancelOrConnectionLoss();
-                    state.cancelOut();
-                    state.reset();
-                }
                 else
                     state.io.onFinish();
             };
@@ -672,13 +669,23 @@ void TCPHandler::runImpl()
             log_query_duration();
 
             if (state.is_connection_closed)
+            {
+                state.cancelOut();
+                state.reset();
                 break;
+            }
 
-            if (!state.empty() && state.cancellation_status != CancellationStatus::FULLY_CANCELLED)
             {
                 std::lock_guard lock(out_mutex);
                 sendLogs();
                 sendEndOfStream();
+            }
+
+            if (state.empty() || state.cancellation_status == CancellationStatus::FULLY_CANCELLED)
+            {
+                state.cancelOut();
+                state.reset();
+                break;
             }
 
             /// QueryState should be cleared before QueryScope, since otherwise
@@ -1033,7 +1040,6 @@ void TCPHandler::processInsertQuery()
 
         if (state.cancellation_status == CancellationStatus::FULLY_CANCELLED)
         {
-            state.cancelOut();
             executor.cancel();
         }
         else
@@ -2492,6 +2498,9 @@ void TCPHandler::sendEndOfStream()
 {
     state.sent_all_data = true;
     state.io.setAllDataSent();
+
+    if (out->isCanceled())
+        return;
 
     writeVarUInt(Protocol::Server::EndOfStream, *out);
 

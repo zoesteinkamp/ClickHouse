@@ -7,8 +7,8 @@ namespace DB
 
 /** Rewrite file() table function into fileCluster() function.
   *
-  * Example: SELECT file(...) FROM distributed_table;
-  * Result: SELECT fileCluster(...) FROM distributed_table;
+  * Example: SELECT * FROM file(...);
+  * Result: SELECT * FROM fileCluster(...);
   */
 class ReplaceTableFunctionsWithClusterVariantsPass final : public IQueryTreePass
 {

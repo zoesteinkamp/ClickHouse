@@ -7,6 +7,7 @@
 #include <Common/ErrorCodes.h>
 #include <Common/Exception.h>
 
+#include <Common/logger_useful.h>
 
 namespace DB
 {
@@ -31,6 +32,8 @@ JSONWebKey JSONWebKey::fromRSAKey(const Poco::Crypto::RSAKey & key)
 
     auto e_enc = base64Encode({e.begin(), e.end()}, /*url_encoding*/ true, /*no_padding*/ true);
     auto n_enc = base64Encode({n.begin(), n.end()}, /*url_encoding*/ true, /*no_padding*/ true);
+
+    LOG_DEBUG(&Poco::Logger::get("JSONWebKey"), "RSAKey: e: {}, n: {}", e_enc, n_enc);
 
     return JSONWebKey{
         .e = e_enc,

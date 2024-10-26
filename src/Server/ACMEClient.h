@@ -68,6 +68,13 @@ struct Directory
 
 
 static constexpr auto ACME_CHALLENGE_HTTP_PATH = "/.well-known/acme-challenge/";
+
+///  TODO should we include provider name here?
+///  /clickhouse/acme
+///     /account_private_key
+///     /challenges
+///         /test.example.com
+///
 static constexpr auto ZOOKEEPER_ACME_BASE_PATH = "/clickhouse/acme";
 
 static constexpr auto HTTP_01_CHALLENGE_TYPE = "http-01";
@@ -106,11 +113,13 @@ private:
     /// Also may be used as an account URL
     std::string key_id;
     std::shared_ptr<Poco::Crypto::RSAKey> private_acme_key;
+    std::mutex private_acme_key_mutex;
 
     DirectoryPtr directory;
 
     BackgroundSchedulePoolTaskHolder authentication_task;
     BackgroundSchedulePoolTaskHolder refresh_key_task;
+    BackgroundSchedulePoolTaskHolder refresh_certificates_task;
 
     zkutil::ZooKeeperPtr zookeeper;
     std::shared_ptr<zkutil::ZooKeeperLock> lock;

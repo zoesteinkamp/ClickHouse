@@ -1,4 +1,5 @@
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <Server/ACMEClient.h>
 
@@ -64,14 +65,6 @@ namespace
 
 namespace fs = std::filesystem;
 
-// void dumberCallback(const std::string & domain_name, const std::string & url, const std::string & key)
-// {
-//     /// Callback for domain thevar1able.com with url
-//     /// http://thevar1able.com/.well-known/acme-challenge/TU9yW7Ad6RgzrmILfp8Zyn9swtxhYrlMYAXVQe29fPU
-//     /// and key TU9yW7Ad6RgzrmILfp8Zyn9swtxhYrlMYAXVQe29fPU.A1qzB0q34e_9tysLnbHKvnXAj49583OrPNUL7cPbC5Q
-//
-//     ACMEClient::instance().dummyCallback(domain_name, url, key);
-// }
 std::string generateCSR(std::vector<std::string> domain_names)
 {
     if (domain_names.empty())
@@ -207,9 +200,8 @@ void ACMEClient::requestCertificate(const Poco::Util::AbstractConfiguration &)
     /// TODO
 }
 
-/// uninitialized -> load/generate key -> authorize -> ready
+/// uninitialized -> load/generate key -> authorize -> watch for expiration
 void ACMEClient::initialize(const Poco::Util::AbstractConfiguration & config)
-try
 {
     if (initialized)
         return;
@@ -221,7 +213,7 @@ try
     // if (http_port != 80 && !initialized)
     //     LOG_WARNING(log, "For ACME HTTP challenge HTTP port must be 80, but is {}", http_port);
 
-    directory_url = config.getString("acme.directory_url", LetsEncrypt::ACME_STAGING_DIRECTORY_URL);
+    directory_url = config.getString("acme.directory_url", LetsEncrypt::ACME_STAGING_DIRECTORY_URL);  /// FIXME
     contact_email = config.getString("acme.email", "");
     terms_of_service_agreed = config.getBool("acme.terms_of_service_agreed");
 
@@ -243,40 +235,50 @@ try
 
     BackgroundSchedulePool & bgpool = Context::getGlobalContextInstance()->getSchedulePool();
 
-    // lock = createSimpleZooKeeperLock(zk_client, ZOOKEEPER_ACME_BASE_PATH, "leader", "ACME lock", /*throw_if_lost*/true);
+    refresh_certificates_task = bgpool.createTask(
+        "ACMECertRefresh",
+        [this]
+        {
+            try
+            {
+                // auto context = Context::getGlobalContextInstance();
+                // auto zk = context->getZooKeeper();
 
-    // auto do_election = [this, zk] {
-    //     LOG_DEBUG(log, "Running election task");
-    //
-    //     election_task->scheduleAfter(1000);
-    //
-    //     lock->tryLock();
-    //
-    //     LOG_DEBUG(log, "I'm the leader: {}", leader_node ? "yes" : "no");
-    //
-    //     /// TODO what if key changes?
-    //     handleKeyCreation();
-    // };
-    // election_task = bgpool.createTask("ACMEClient", do_election);
-    // election_task->activate();
+                /// read orders from zk before submitting new ones
+                auto ordr = order();
+            }
+            catch (...)
+            {
+                refresh_certificates_task->scheduleAfter(10000);
+                tryLogCurrentException("Failed to refresh certificates TODO");
+            }
 
-    // do_election();
+            refresh_certificates_task->scheduleAfter(1000 * 60 * 60); /// fixme config
+        }
+    );
 
     authentication_task = bgpool.createTask(
         "ACMEAuth",
         [this]
         {
+            LOG_DEBUG(log, "Running ACMEClient authentication task");
             if (!key_id.empty())
                 return;
 
             try
             {
+                if (!directory)
+                    directory = getDirectory();
+
                 authenticate();
+
+                refresh_certificates_task->activateAndSchedule();
+                authentication_task->deactivate();
             }
             catch (...)
             {
                 authentication_task->scheduleAfter(1000);
-                tryLogCurrentException("Failed to authenticate");
+                tryLogCurrentException("ACMEClient");
             }
         });
 
@@ -303,11 +305,14 @@ try
             Coordination::Stat private_key_stat;
             std::string private_key;
 
-            auto res = zk->tryGet(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "account_private_key", private_key, &private_key_stat);
-            if (!res)
+            zk->tryGet(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "account_private_key", private_key, &private_key_stat);
+            if (private_key.empty())
             {
                 LOG_DEBUG(log, "Generating new RSA private key for ACME account");
                 private_key = generatePrivateKeyInPEM();
+
+                if (!lock)
+                    lock = std::make_shared<zkutil::ZooKeeperLock>(zookeeper, ZOOKEEPER_ACME_BASE_PATH, "leader_lock", "Key generation lock");
 
                 try
                 {
@@ -321,41 +326,38 @@ try
 
                     /// TODO handle exception
                     zk->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH) / "account_private_key", private_key);
+
+                    LOG_DEBUG(log, "Private key saved to ZooKeeper");
                 }
                 catch (...)
                 {
                     refresh_key_task->scheduleAfter(1000);
-                    tryLogCurrentException("Failed to create private key");
+                    tryLogCurrentException("ACMEClient");
                 }
             }
-
             chassert(!private_key.empty());
 
-            std::istringstream private_key_stream(private_key); // STYLE_CHECK_ALLOW_STD_STRING_STREAM
-            private_acme_key = std::make_shared<Poco::Crypto::RSAKey>(nullptr, &private_key_stream, "");
+            {
+                std::lock_guard key_lock(private_acme_key_mutex);
+                std::istringstream private_key_stream(private_key); // STYLE_CHECK_ALLOW_STD_STRING_STREAM
+                private_acme_key = std::make_shared<Poco::Crypto::RSAKey>(nullptr, &private_key_stream, "");
+            }
 
-            LOG_DEBUG(log, "ACME private key successfully initialized");
+            LOG_DEBUG(log, "ACME private key successfully loaded {}", private_key);
 
-            refresh_key_task->deactivate();
             authentication_task->activateAndSchedule();
+            refresh_key_task->deactivate();
+
+            keys_initialized = true;
         });
 
-    refresh_key_task->activateAndSchedule();
+    if (!private_acme_key)
+        refresh_key_task->activateAndSchedule();
 
-
-    if (!initialized)
-    {
-        if (!directory)
-            directory = getDirectory();
-
-        if (!authenticated)
-        {
-            /// wait for key creation
-            authenticate();
-            authenticated = true;
-        }
-
-        chassert(!key_id.empty());
+    // if (!initialized)
+    // {
+    //
+    //     chassert(!key_id.empty());
 
         // auto order_url = order();
         // do some kind of event loop here
@@ -366,16 +368,10 @@ try
 
         // auto response = doJWSRequest(fin, "", nullptr);
         // LOG_DEBUG(log, "Finalize response: {}", response);
-    }
+    // }
 
     /// TODO on initialization go through config and try to reissue all
     /// expiring/missing certificates.
-
-    initialized = true;
-}
-catch (...)
-{
-    tryLogCurrentException("Failed :(");
 }
 
 
@@ -407,8 +403,6 @@ ACMEClient::doJWSRequest(const std::string & url, const std::string & payload, s
 
     auto uri = Poco::URI(url);
 
-    auto jwk = JSONWebKey::fromRSAKey(*private_acme_key).toString();
-
     std::string protected_enc;
     {
         std::string protected_data;
@@ -416,15 +410,26 @@ ACMEClient::doJWSRequest(const std::string & url, const std::string & payload, s
         if (!key_id.empty())
             protected_data = fmt::format(R"({{"alg":"RS256","kid":"{}","nonce":"{}","url":"{}"}})", key_id, nonce, url);
         else
+        {
+            std::lock_guard key_lock(private_acme_key_mutex);
+            auto jwk = JSONWebKey::fromRSAKey(*private_acme_key).toString();
             protected_data = fmt::format(R"({{"alg":"RS256","jwk":{},"nonce":"{}","url":"{}"}})", jwk, nonce, url);
+        }
+
+        LOG_DEBUG(log, "Protected data: {}", protected_data);
 
         protected_enc = base64Encode(protected_data, /*url_encoding*/ true, /*no_padding*/ true);
     }
 
+    LOG_DEBUG(log, "Payload: {}", payload);
     auto payload_enc = base64Encode(payload, /*url_encoding*/ true, /*no_padding*/ true);
 
     std::string to_sign = protected_enc + "." + payload_enc;
-    auto signature = calculateHMACwithSHA256(to_sign, *private_acme_key);
+    std::string signature;
+    {
+        std::lock_guard key_lock(private_acme_key_mutex);
+        signature = calculateHMACwithSHA256(to_sign, *private_acme_key);
+    }
 
     std::string request_data
         = R"({"protected":")" + protected_enc + R"(","payload":")" + payload_enc + R"(","signature":")" + signature + R"("})";
@@ -434,6 +439,7 @@ ACMEClient::doJWSRequest(const std::string & url, const std::string & payload, s
     r.set("Content-Type", "application/jose+json");
     r.set("Content-Length", std::to_string(request_data.size()));
 
+    LOG_DEBUG(log, "Requesting {} with payload: {}", url, request_data);
     auto session = makeHTTPSession(HTTPConnectionGroupType::HTTP, uri, connection_timeout_settings, proxy_configuration);
 
     auto & ostream = session->sendRequest(r);
@@ -447,9 +453,6 @@ ACMEClient::doJWSRequest(const std::string & url, const std::string & payload, s
     std::string response_str;
     Poco::StreamCopier::copyToString(*rstream, response_str);
 
-    // Poco::JSON::Parser parser;
-    // auto json = parser.parse(response_str).extract<Poco::JSON::Object::Ptr>();
-
     return response_str;
 }
 
@@ -462,7 +465,7 @@ void ACMEClient::authenticate()
     auto contact = Poco::JSON::Array();
 
     if (!contact_email.empty())
-        contact.add(contact_email);
+        contact.add("mailto:" + contact_email);
 
     payload_object.set("contact", contact);
     payload_object.set("termsOfServiceAgreed", terms_of_service_agreed);
@@ -575,6 +578,9 @@ void ACMEClient::processAuthorization(const std::string & auth_url)
         LOG_DEBUG(log, "Challenge: type: {}, url: {}, status: {}, token: {}", type, url, status, token);
         if (type == HTTP_01_CHALLENGE_TYPE)
         {
+            auto zk = Context::getGlobalContextInstance()->getZooKeeper();
+            zk->createIfNotExists(fs::path(ZOOKEEPER_ACME_BASE_PATH) / token, token);
+
             if (status == "valid")
                 continue;
 
@@ -622,9 +628,6 @@ std::string ACMEClient::requestNonce()
 
 std::string ACMEClient::requestChallenge(const std::string & uri)
 {
-    /// TODO go to Keeper and query existing challenge for domain
-    /// if not present, return "".
-
     LOG_DEBUG(log, "Requesting challenge for {}", uri);
 
     // {

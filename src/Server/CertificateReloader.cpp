@@ -141,36 +141,35 @@ void CertificateReloader::tryLoadImpl(const Poco::Util::AbstractConfiguration & 
     if (new_cert_path.empty() || new_key_path.empty())
     {
         LOG_INFO(log, "One of paths is empty. Cannot apply new configuration for certificates. Fill all paths and try again.");
+        return;
     }
-    else
+
+    ACMEClient::ACMEClient::instance().requestCertificate(config /*, prefix*/);
+
+    try
     {
-        ACMEClient::ACMEClient::instance().requestCertificate(config);
+        auto it = findOrInsert(ctx, prefix);
 
-        try
+        bool cert_file_changed = it->cert_file.changeIfModified(std::move(new_cert_path), log);
+        bool key_file_changed = it->key_file.changeIfModified(std::move(new_key_path), log);
+
+        if (cert_file_changed || key_file_changed)
         {
-            auto it = findOrInsert(ctx, prefix);
+            LOG_DEBUG(log, "Reloading certificate ({}) and key ({}).", it->cert_file.path, it->key_file.path);
 
-            bool cert_file_changed = it->cert_file.changeIfModified(std::move(new_cert_path), log);
-            bool key_file_changed = it->key_file.changeIfModified(std::move(new_key_path), log);
+            std::string pass_phrase = config.getString(prefix + "privateKeyPassphraseHandler.options.password", "");
+            it->data.set(std::make_unique<const Data>(it->cert_file.path, it->key_file.path, pass_phrase));
 
-            if (cert_file_changed || key_file_changed)
-            {
-                LOG_DEBUG(log, "Reloading certificate ({}) and key ({}).", it->cert_file.path, it->key_file.path);
-
-                std::string pass_phrase = config.getString(prefix + "privateKeyPassphraseHandler.options.password", "");
-                it->data.set(std::make_unique<const Data>(it->cert_file.path, it->key_file.path, pass_phrase));
-
-                LOG_INFO(log, "Reloaded certificate ({}) and key ({}).", it->cert_file.path, it->key_file.path);
-            }
-
-            /// If callback is not set yet
-            if (!it->initialized)
-                init(&*it);
+            LOG_INFO(log, "Reloaded certificate ({}) and key ({}).", it->cert_file.path, it->key_file.path);
         }
-        catch (...)
-        {
-            LOG_ERROR(log, getCurrentExceptionMessageAndPattern(/* with_stacktrace */ false));
-        }
+
+        /// If callback is not set yet
+        if (!it->initialized)
+            init(&*it);
+    }
+    catch (...)
+    {
+        LOG_ERROR(log, getCurrentExceptionMessageAndPattern(/* with_stacktrace */ false));
     }
 }
 
